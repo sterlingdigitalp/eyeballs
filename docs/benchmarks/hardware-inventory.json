@@ -1,0 +1,548 @@
+{
+  "cameras" : [
+    {
+      "audioFormats" : [
+
+      ],
+      "connected" : true,
+      "deviceType" : "AVCaptureDeviceTypeBuiltInWideAngleCamera",
+      "id" : "6C707041-05AC-0011-0006-000000000001",
+      "manufacturer" : "Apple Inc.",
+      "name" : "MacBook Pro Camera",
+      "suspended" : false,
+      "videoFormats" : [
+        {
+          "height" : 480,
+          "maxFrameRate" : 30,
+          "mediaSubType" : "420v",
+          "minFrameRate" : 15,
+          "width" : 640
+        },
+        {
+          "height" : 720,
+          "maxFrameRate" : 30,
+          "mediaSubType" : "420v",
+          "minFrameRate" : 15,
+          "width" : 1280
+        },
+        {
+          "height" : 1328,
+          "maxFrameRate" : 30,
+          "mediaSubType" : "420v",
+          "minFrameRate" : 15,
+          "width" : 1760
+        },
+        {
+          "height" : 1760,
+          "maxFrameRate" : 30,
+          "mediaSubType" : "420v",
+          "minFrameRate" : 15,
+          "width" : 1328
+        },
+        {
+          "height" : 1552,
+          "maxFrameRate" : 30,
+          "mediaSubType" : "420v",
+          "minFrameRate" : 15,
+          "width" : 1552
+        },
+        {
+          "height" : 1080,
+          "maxFrameRate" : 30,
+          "mediaSubType" : "420v",
+          "minFrameRate" : 15,
+          "width" : 1920
+        },
+        {
+          "height" : 1920,
+          "maxFrameRate" : 30,
+          "mediaSubType" : "420v",
+          "minFrameRate" : 15,
+          "width" : 1080
+        }
+      ]
+    },
+    {
+      "audioFormats" : [
+
+      ],
+      "connected" : true,
+      "deviceType" : "AVCaptureDeviceTypeExternal",
+      "id" : "0x1200000046d085e",
+      "manufacturer" : "Unknown",
+      "name" : "Logitech BRIO",
+      "suspended" : false,
+      "videoFormats" : [
+        {
+          "height" : 120,
+          "maxFrameRate" : 30.00003000003,
+          "mediaSubType" : "yuvs",
+          "minFrameRate" : 5,
+          "width" : 160
+        },
+        {
+          "height" : 120,
+          "maxFrameRate" : 30.00003000003,
+          "mediaSubType" : "420v",
+          "minFrameRate" : 5,
+          "width" : 160
+        },
+        {
+          "height" : 144,
+          "maxFrameRate" : 30.00003000003,
+          "mediaSubType" : "yuvs",
+          "minFrameRate" : 5,
+          "width" : 176
+        },
+        {
+          "height" : 144,
+          "maxFrameRate" : 30.00003000003,
+          "mediaSubType" : "420v",
+          "minFrameRate" : 5,
+          "width" : 176
+        },
+        {
+          "height" : 180,
+          "maxFrameRate" : 30.00003000003,
+          "mediaSubType" : "yuvs",
+          "minFrameRate" : 5,
+          "width" : 320
+        },
+        {
+          "height" : 180,
+          "maxFrameRate" : 30.00003000003,
+          "mediaSubType" : "420v",
+          "minFrameRate" : 5,
+          "width" : 320
+        },
+        {
+          "height" : 240,
+          "maxFrameRate" : 30.00003000003,
+          "mediaSubType" : "yuvs",
+          "minFrameRate" : 5,
+          "width" : 320
+        },
+        {
+          "height" : 240,
+          "maxFrameRate" : 30.00003000003,
+          "mediaSubType" : "420v",
+          "minFrameRate" : 5,
+          "width" : 320
+        },
+        {
+          "height" : 340,
+          "maxFrameRate" : 30.00003000003,
+          "mediaSubType" : "yuvs",
+          "minFrameRate" : 30.00003000003,
+          "width" : 340
+        },
+        {
+          "height" : 288,
+          "maxFrameRate" : 30.00003000003,
+          "mediaSubType" : "yuvs",
+          "minFrameRate" : 5,
+          "width" : 352
+        },
+        {
+          "height" : 288,
+          "maxFrameRate" : 30.00003000003,
+          "mediaSubType" : "420v",
+          "minFrameRate" : 5,
+          "width" : 352
+        },
+        {
+          "height" : 240,
+          "maxFrameRate" : 30.00003000003,
+          "mediaSubType" : "yuvs",
+          "minFrameRate" : 5,
+          "width" : 424
+        },
+        {
+          "height" : 240,
+          "maxFrameRate" : 30.00003000003,
+          "mediaSubType" : "420v",
+          "minFrameRate" : 5,
+          "width" : 424
+        },
+        {
+          "height" : 440,
+          "maxFrameRate" : 30.00003000003,
+          "mediaSubType" : "yuvs",
+          "minFrameRate" : 30.00003000003,
+          "width" : 440
+        },
+        {
+          "height" : 270,
+          "maxFrameRate" : 30.00003000003,
+          "mediaSubType" : "yuvs",
+          "minFrameRate" : 5,
+          "width" : 480
+        },
+        {
+          "height" : 270,
+          "maxFrameRate" : 30.00003000003,
+          "mediaSubType" : "420v",
+          "minFrameRate" : 5,
+          "width" : 480
+        },
+        {
+          "height" : 360,
+          "maxFrameRate" : 30.00003000003,
+          "mediaSubType" : "420v",
+          "minFrameRate" : 5,
+          "width" : 640
+        },
+        {
+          "height" : 480,
+          "maxFrameRate" : 30.00003000003,
+          "mediaSubType" : "yuvs",
+          "minFrameRate" : 5,
+          "width" : 640
+        },
+        {
+          "height" : 480,
+          "maxFrameRate" : 30.00003000003,
+          "mediaSubType" : "420v",
+          "minFrameRate" : 5,
+          "width" : 640
+        },
+        {
+          "height" : 480,
+          "maxFrameRate" : 120.00048000192001,
+          "mediaSubType" : "420v",
+          "minFrameRate" : 5,
+          "width" : 640
+        },
+        {
+          "height" : 448,
+          "maxFrameRate" : 30.00003000003,
+          "mediaSubType" : "yuvs",
+          "minFrameRate" : 5,
+          "width" : 800
+        },
+        {
+          "height" : 448,
+          "maxFrameRate" : 30.00003000003,
+          "mediaSubType" : "420v",
+          "minFrameRate" : 5,
+          "width" : 800
+        },
+        {
+          "height" : 600,
+          "maxFrameRate" : 30.00003000003,
+          "mediaSubType" : "yuvs",
+          "minFrameRate" : 5,
+          "width" : 800
+        },
+        {
+          "height" : 600,
+          "maxFrameRate" : 30.00003000003,
+          "mediaSubType" : "420v",
+          "minFrameRate" : 5,
+          "width" : 800
+        },
+        {
+          "height" : 480,
+          "maxFrameRate" : 30.00003000003,
+          "mediaSubType" : "yuvs",
+          "minFrameRate" : 5,
+          "width" : 848
+        },
+        {
+          "height" : 480,
+          "maxFrameRate" : 30.00003000003,
+          "mediaSubType" : "420v",
+          "minFrameRate" : 5,
+          "width" : 848
+        },
+        {
+          "height" : 540,
+          "maxFrameRate" : 30.00003000003,
+          "mediaSubType" : "yuvs",
+          "minFrameRate" : 5,
+          "width" : 960
+        },
+        {
+          "height" : 540,
+          "maxFrameRate" : 30.00003000003,
+          "mediaSubType" : "420v",
+          "minFrameRate" : 5,
+          "width" : 960
+        },
+        {
+          "height" : 576,
+          "maxFrameRate" : 30.00003000003,
+          "mediaSubType" : "yuvs",
+          "minFrameRate" : 5,
+          "width" : 1024
+        },
+        {
+          "height" : 576,
+          "maxFrameRate" : 30.00003000003,
+          "mediaSubType" : "420v",
+          "minFrameRate" : 5,
+          "width" : 1024
+        },
+        {
+          "height" : 720,
+          "maxFrameRate" : 30.00003000003,
+          "mediaSubType" : "yuvs",
+          "minFrameRate" : 5,
+          "width" : 1280
+        },
+        {
+          "height" : 720,
+          "maxFrameRate" : 30.00003000003,
+          "mediaSubType" : "420v",
+          "minFrameRate" : 5,
+          "width" : 1280
+        },
+        {
+          "height" : 720,
+          "maxFrameRate" : 90.00009000009,
+          "mediaSubType" : "420v",
+          "minFrameRate" : 5,
+          "width" : 1280
+        },
+        {
+          "height" : 896,
+          "maxFrameRate" : 30.00003000003,
+          "mediaSubType" : "yuvs",
+          "minFrameRate" : 5,
+          "width" : 1600
+        },
+        {
+          "height" : 896,
+          "maxFrameRate" : 30.00003000003,
+          "mediaSubType" : "420v",
+          "minFrameRate" : 5,
+          "width" : 1600
+        },
+        {
+          "height" : 1080,
+          "maxFrameRate" : 30.00003000003,
+          "mediaSubType" : "yuvs",
+          "minFrameRate" : 5,
+          "width" : 1920
+        },
+        {
+          "height" : 1080,
+          "maxFrameRate" : 30.00003000003,
+          "mediaSubType" : "420v",
+          "minFrameRate" : 5,
+          "width" : 1920
+        },
+        {
+          "height" : 1080,
+          "maxFrameRate" : 60.000240000960005,
+          "mediaSubType" : "420v",
+          "minFrameRate" : 5,
+          "width" : 1920
+        },
+        {
+          "height" : 1440,
+          "maxFrameRate" : 30.00003000003,
+          "mediaSubType" : "420v",
+          "minFrameRate" : 5,
+          "width" : 2560
+        },
+        {
+          "height" : 2160,
+          "maxFrameRate" : 30.00003000003,
+          "mediaSubType" : "420v",
+          "minFrameRate" : 5,
+          "width" : 3840
+        },
+        {
+          "height" : 2160,
+          "maxFrameRate" : 30.00003000003,
+          "mediaSubType" : "420v",
+          "minFrameRate" : 5,
+          "width" : 4096
+        }
+      ]
+    },
+    {
+      "audioFormats" : [
+
+      ],
+      "connected" : true,
+      "deviceType" : "AVCaptureDeviceTypeExternal",
+      "id" : "DE913008-DD87-450F-99A6-712A00000001",
+      "manufacturer" : "",
+      "name" : "SterlingDP Camera",
+      "suspended" : false,
+      "videoFormats" : [
+        {
+          "height" : 480,
+          "maxFrameRate" : 30,
+          "mediaSubType" : "420v",
+          "minFrameRate" : 3,
+          "width" : 640
+        },
+        {
+          "height" : 480,
+          "maxFrameRate" : 60,
+          "mediaSubType" : "420v",
+          "minFrameRate" : 3,
+          "width" : 640
+        },
+        {
+          "height" : 720,
+          "maxFrameRate" : 30,
+          "mediaSubType" : "420v",
+          "minFrameRate" : 2,
+          "width" : 1280
+        },
+        {
+          "height" : 720,
+          "maxFrameRate" : 60,
+          "mediaSubType" : "420v",
+          "minFrameRate" : 3,
+          "width" : 1280
+        },
+        {
+          "height" : 1080,
+          "maxFrameRate" : 30,
+          "mediaSubType" : "420v",
+          "minFrameRate" : 2,
+          "width" : 1920
+        },
+        {
+          "height" : 1080,
+          "maxFrameRate" : 60,
+          "mediaSubType" : "420v",
+          "minFrameRate" : 3,
+          "width" : 1920
+        },
+        {
+          "height" : 1440,
+          "maxFrameRate" : 30,
+          "mediaSubType" : "420v",
+          "minFrameRate" : 2,
+          "width" : 1920
+        }
+      ]
+    }
+  ],
+  "generatedAt" : "2026-07-25T20:16:09Z",
+  "microphones" : [
+    {
+      "audioFormats" : [
+        {
+          "bitsPerChannel" : 16,
+          "channels" : 2,
+          "formatId" : "lpcm",
+          "sampleRate" : 48000
+        },
+        {
+          "bitsPerChannel" : 16,
+          "channels" : 2,
+          "formatId" : "lpcm",
+          "sampleRate" : 32000
+        },
+        {
+          "bitsPerChannel" : 16,
+          "channels" : 2,
+          "formatId" : "lpcm",
+          "sampleRate" : 24000
+        },
+        {
+          "bitsPerChannel" : 16,
+          "channels" : 2,
+          "formatId" : "lpcm",
+          "sampleRate" : 16000
+        },
+        {
+          "bitsPerChannel" : 16,
+          "channels" : 2,
+          "formatId" : "lpcm",
+          "sampleRate" : 48000
+        },
+        {
+          "bitsPerChannel" : 16,
+          "channels" : 2,
+          "formatId" : "lpcm",
+          "sampleRate" : 32000
+        },
+        {
+          "bitsPerChannel" : 16,
+          "channels" : 2,
+          "formatId" : "lpcm",
+          "sampleRate" : 24000
+        },
+        {
+          "bitsPerChannel" : 16,
+          "channels" : 2,
+          "formatId" : "lpcm",
+          "sampleRate" : 16000
+        }
+      ],
+      "connected" : true,
+      "deviceType" : "AVCaptureDeviceTypeMicrophone",
+      "id" : "AppleUSBAudioEngine:Unknown Manufacturer:Logitech BRIO:EAC14027:4",
+      "manufacturer" : "Unknown Manufacturer",
+      "name" : "Logitech BRIO",
+      "suspended" : false,
+      "videoFormats" : [
+
+      ]
+    },
+    {
+      "audioFormats" : [
+        {
+          "bitsPerChannel" : 32,
+          "channels" : 1,
+          "formatId" : "lpcm",
+          "sampleRate" : 96000
+        },
+        {
+          "bitsPerChannel" : 32,
+          "channels" : 1,
+          "formatId" : "lpcm",
+          "sampleRate" : 88200
+        },
+        {
+          "bitsPerChannel" : 32,
+          "channels" : 1,
+          "formatId" : "lpcm",
+          "sampleRate" : 48000
+        },
+        {
+          "bitsPerChannel" : 32,
+          "channels" : 1,
+          "formatId" : "lpcm",
+          "sampleRate" : 44100
+        }
+      ],
+      "connected" : true,
+      "deviceType" : "AVCaptureDeviceTypeMicrophone",
+      "id" : "BuiltInMicrophoneDevice",
+      "manufacturer" : "Apple Inc.",
+      "name" : "MacBook Pro Microphone",
+      "suspended" : false,
+      "videoFormats" : [
+
+      ]
+    },
+    {
+      "audioFormats" : [
+        {
+          "bitsPerChannel" : 32,
+          "channels" : 1,
+          "formatId" : "lpcm",
+          "sampleRate" : 48000
+        }
+      ],
+      "connected" : true,
+      "deviceType" : "AVCaptureDeviceTypeMicrophone",
+      "id" : "DE913008-DD87-450F-99A6-712A00000003",
+      "manufacturer" : "Apple Inc.",
+      "name" : "SterlingDP Microphone",
+      "suspended" : false,
+      "videoFormats" : [
+
+      ]
+    }
+  ]
+}

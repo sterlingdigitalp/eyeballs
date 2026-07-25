@@ -1,0 +1,29 @@
+{
+  "schemaVersion": "1.0.0",
+  "intervals": [
+    {
+      "startSeconds": 0,
+      "endSeconds": 2,
+      "label": "contact",
+      "note": "synthetic interval A"
+    },
+    {
+      "startSeconds": 2,
+      "endSeconds": 4,
+      "label": "not_contact",
+      "note": "synthetic interval B"
+    },
+    {
+      "startSeconds": 4,
+      "endSeconds": 6,
+      "label": "unknown",
+      "note": "synthetic interval C"
+    },
+    {
+      "startSeconds": 6,
+      "endSeconds": 8,
+      "label": "contact",
+      "note": "synthetic interval D"
+    }
+  ]
+}

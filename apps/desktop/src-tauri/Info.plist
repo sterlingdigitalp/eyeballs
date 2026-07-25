@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>NSCameraUsageDescription</key>
+  <string>Camera Presence Coach uses the selected camera only after you enable preview, so it can calibrate and measure camera contact locally.</string>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>Camera Presence Coach uses the selected microphone only after separate approval, and only when you choose to make a test recording.</string>
+</dict>
+</plist>

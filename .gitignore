@@ -1,0 +1,8 @@
+node_modules/
+dist/
+apps/desktop/src-tauri/target/
+native/capture-macos/.build/
+apps/desktop/public/mediapipe/
+apps/desktop/public/models/*.task
+*.log
+.DS_Store

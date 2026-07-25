@@ -1,0 +1,116 @@
+import type { StoredSession } from "./store";
+import {
+  calibrationSchema,
+  correctionSchema,
+  featureVectorSchema,
+  gazeEventSchema,
+  gazePredictionSchema,
+  sessionManifestSchema,
+} from "../../../../packages/contracts/src";
+import { z } from "zod";
+
+const storedSessionSchema = z.object({
+  manifest: sessionManifestSchema,
+  calibrationSnapshot: calibrationSchema.optional(),
+  features: z.array(featureVectorSchema),
+  predictions: z.array(gazePredictionSchema),
+  events: z.array(gazeEventSchema),
+  corrections: z.array(correctionSchema),
+  media: z.instanceof(Blob).optional(),
+});
+
+export function parseStoredSession(value: unknown): StoredSession | undefined {
+  const parsed = storedSessionSchema.safeParse(value);
+  if (parsed.success) return parsed.data;
+  const manifestValue =
+    value && typeof value === "object" && "manifest" in value
+      ? (value as { manifest: unknown }).manifest
+      : undefined;
+  const manifest = sessionManifestSchema.safeParse(manifestValue);
+  if (!manifest.success) {
+    console.error("Discarded a stored session with an unreadable manifest.");
+    return undefined;
+  }
+  console.error(
+    `Recovered session ${manifest.data.id} as invalid because its stored evidence failed schema validation.`,
+  );
+  return {
+    manifest: {
+      ...manifest.data,
+      status: "invalid",
+      recoveryNote:
+        "Stored session evidence failed schema validation. The readable manifest was preserved.",
+    },
+    features: [],
+    predictions: [],
+    events: [],
+    corrections: [],
+  };
+}
+
+export function parseStoredSessions(values: unknown[]): StoredSession[] {
+  return values
+    .map(parseStoredSession)
+    .filter((value): value is StoredSession => value !== undefined);
+}
+
+export class SessionWriteQueue {
+  private tail: Promise<void> = Promise.resolve();
+
+  enqueue(write: () => Promise<void>): Promise<void> {
+    const next = this.tail.then(write, write);
+    this.tail = next.catch(() => undefined);
+    return next;
+  }
+}
+
+const statusRank: Record<StoredSession["manifest"]["status"], number> = {
+  recording: 0,
+  finalizing: 1,
+  incomplete: 2,
+  invalid: 2,
+  complete: 3,
+};
+
+const preferredCheckpoint = (
+  first: StoredSession,
+  second: StoredSession,
+): StoredSession => {
+  const statusDifference =
+    statusRank[first.manifest.status] - statusRank[second.manifest.status];
+  if (statusDifference !== 0) return statusDifference > 0 ? first : second;
+  return first.manifest.frameCount >= second.manifest.frameCount ? first : second;
+};
+
+const longer = <T>(first: T[], second: T[]): T[] =>
+  first.length >= second.length ? first : second;
+
+export function mergeStoredSessions(
+  browserSessions: StoredSession[],
+  nativeSessions: StoredSession[] = [],
+): StoredSession[] {
+  const browserById = new Map(
+    browserSessions.map((session) => [session.manifest.id, session]),
+  );
+  const nativeById = new Map(
+    nativeSessions.map((session) => [session.manifest.id, session]),
+  );
+  const ids = new Set([...browserById.keys(), ...nativeById.keys()]);
+  return [...ids].map((id) => {
+    const browser = browserById.get(id);
+    const native = nativeById.get(id);
+    if (!browser) return native!;
+    if (!native) return browser;
+    const preferred = preferredCheckpoint(browser, native);
+    return {
+      ...preferred,
+      features: longer(browser.features, native.features),
+      predictions: longer(browser.predictions, native.predictions),
+      events: longer(browser.events, native.events),
+      corrections: longer(browser.corrections, native.corrections),
+      calibrationSnapshot:
+        browser.calibrationSnapshot ?? native.calibrationSnapshot,
+      media: browser.media ?? native.media,
+    };
+  }).sort((a, b) => b.manifest.startedAt.localeCompare(a.manifest.startedAt));
+}

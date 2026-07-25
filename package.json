@@ -1,0 +1,49 @@
+{
+  "name": "camera-presence-coach",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "prepare:assets": "sh scripts/dev/prepare-assets.sh",
+    "fixture:av": "sh scripts/dev/generate-synthetic-av-fixture.sh",
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "reprocess": "tsx scripts/evaluate/reprocess-session.ts",
+    "audit:calibrations": "tsx scripts/evaluate/audit-local-calibrations.ts",
+    "benchmark:tracker": "tsx scripts/evaluate/benchmark-tracker.ts",
+    "validate:config": "tsx scripts/evaluate/validate-config.ts",
+    "validate:vision-fixture": "tsx scripts/evaluate/validate-vision-fixture.ts",
+    "package:app": "sh scripts/dev/package-app.sh",
+    "typecheck": "tsc -b --pretty false",
+    "lint": "eslint . --max-warnings 0",
+    "tauri": "tauri",
+    "verify": "npm run prepare:assets && npm audit --audit-level=high && npm run validate:config && npm run lint && npm run typecheck && npm run test && npm run build && cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml --check && cargo clippy --manifest-path apps/desktop/src-tauri/Cargo.toml --all-targets -- -D warnings && cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml && swift build --package-path native/capture-macos && npm run validate:vision-fixture"
+  },
+  "dependencies": {
+    "@mediapipe/tasks-vision": "^0.10.22-rc.20250304",
+    "@tauri-apps/api": "^2.8.0",
+    "idb": "^8.0.3",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1",
+    "zod": "^4.0.10"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@tauri-apps/cli": "^2.8.2",
+    "@types/react": "^19.1.9",
+    "@types/react-dom": "^19.1.7",
+    "@vitejs/plugin-react": "^4.7.0",
+    "eslint": "^10.8.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "eslint-plugin-react-refresh": "^0.5.3",
+    "globals": "^16.3.0",
+    "jsdom": "^26.1.0",
+    "typescript": "~5.8.3",
+    "typescript-eslint": "^8.39.0",
+    "tsx": "^4.20.3",
+    "vite": "^7.0.6",
+    "vitest": "^3.2.4"
+  }
+}
