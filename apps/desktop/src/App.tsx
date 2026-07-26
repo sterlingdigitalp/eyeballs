@@ -77,6 +77,7 @@ import {
   noteWindowsFromDrill,
   rateSessionCue,
   requestStop,
+  reviseOutlineDrill,
   REVIEW_TIMELINE_ZOOM_LEVELS,
   restartSafeRecordingFlag,
   seekSecondsFromTimelineUs,
@@ -2083,16 +2084,48 @@ function Measure({
             />
             <CustomDrillImport
               disabled={preparingAudio}
-              onCreate={async ({ name, outline, durationTargetSec }) => {
+              drills={customDrills}
+              onCreate={async ({
+                name,
+                outline,
+                durationTargetSec,
+                phraseStartSec,
+              }) => {
                 const custom = drillFromOutline(outline, {
                   id: `custom-outline-${crypto.randomUUID()}`,
                   name,
                   durationTargetSec,
+                  phraseStartSec,
                 });
                 const next = await store.customDrills.upsert(custom);
                 setCustomDrills(next);
                 setSelectedDrillId(custom.id);
                 setIntensity(custom.contactPolicy.feedbackLevel);
+              }}
+              onUpdate={async (
+                existing,
+                { name, outline, durationTargetSec, phraseStartSec },
+              ) => {
+                const revised = reviseOutlineDrill(existing, outline, {
+                  name,
+                  durationTargetSec,
+                  phraseStartSec,
+                });
+                const next = await store.customDrills.upsert(revised);
+                setCustomDrills(next);
+                setSelectedDrillId(revised.id);
+                setIntensity(revised.contactPolicy.feedbackLevel);
+              }}
+              onDelete={async (drill) => {
+                const next = await store.customDrills.remove(drill.id);
+                setCustomDrills(next);
+                if (selectedDrillId === drill.id) {
+                  const fallback = builtinDrills[0];
+                  setSelectedDrillId(fallback?.id ?? "");
+                  if (fallback) {
+                    setIntensity(fallback.contactPolicy.feedbackLevel);
+                  }
+                }
               }}
             />
             <div className="train-setup">

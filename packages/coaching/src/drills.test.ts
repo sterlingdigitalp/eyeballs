@@ -7,6 +7,7 @@ import {
   getDrillById,
   loadBuiltinDrills,
   parseDrillDefinition,
+  reviseOutlineDrill,
   resetBuiltinDrillCache,
   SCORING_POLICY_VERSION,
   stampDrillOnSession,
@@ -126,6 +127,58 @@ describe("drill content loading and validation", () => {
     const short = drillFromOutline("One beat", { durationTargetSec: 30 });
     expect(short.completion.minimumDurationSec).toBeLessThanOrEqual(30);
     expect(short.completion.minimumSpeakingSec).toBeLessThanOrEqual(30);
+  });
+
+  it("revises a custom outline without mutating a prior session snapshot", () => {
+    const original = drillFromOutline("- Opening\n- Main point", {
+      id: "custom-outline-stable",
+      name: "Original name",
+      durationTargetSec: 90,
+    });
+    const sessionSnapshot = structuredClone(original);
+    const revised = reviseOutlineDrill(
+      original,
+      "- New opening\n- Updated evidence\n- Close",
+      {
+        name: "Revised name",
+        durationTargetSec: 120,
+        phraseStartSec: [0, 20, 70],
+      },
+    );
+
+    expect(revised.id).toBe(original.id);
+    expect(revised.version).toBe(2);
+    expect(revised.name).toBe("Revised name");
+    expect(revised.prompt.phrases).toEqual([
+      "New opening",
+      "Updated evidence",
+      "Close",
+    ]);
+    expect(revised.durationTargetSec).toBe(120);
+    expect(revised.prompt.phraseStartSec).toEqual([0, 20, 70]);
+    expect(original).toEqual(sessionSnapshot);
+    expect(original.prompt.phrases).toEqual(["Opening", "Main point"]);
+  });
+
+  it("rejects malformed or out-of-duration custom beat timing", () => {
+    expect(() =>
+      drillFromOutline("- Opening\n- Close", {
+        durationTargetSec: 60,
+        phraseStartSec: [0],
+      }),
+    ).toThrow(/one start time per phrase/);
+    expect(() =>
+      drillFromOutline("- Opening\n- Close", {
+        durationTargetSec: 60,
+        phraseStartSec: [0, 60],
+      }),
+    ).toThrow(/exceeds the drill duration/);
+    expect(() =>
+      drillFromOutline("- Opening\n- Close", {
+        durationTargetSec: 60,
+        phraseStartSec: [10, 20],
+      }),
+    ).toThrow(/first phrase must start at 0/);
   });
 
   it("fails curriculum coverage when a level is missing", () => {

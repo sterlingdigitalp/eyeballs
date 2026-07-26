@@ -212,6 +212,12 @@ export const store = {
       await store.customDrills.putAll(next);
       return next;
     },
+    remove: async (drillId: string) => {
+      const existing = await store.customDrills.all();
+      const next = existing.filter((entry) => entry.id !== drillId);
+      await store.customDrills.putAll(next);
+      return next;
+    },
   },
   consents: {
     all: async (): Promise<ConsentRecord[]> => {

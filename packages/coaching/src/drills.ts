@@ -38,7 +38,10 @@ export function parseDrillDefinition(raw: unknown): DrillDefinition {
     const issues = parsed.error.issues.map(
       (issue) => `${issue.path.join(".") || "(root)"}: ${issue.message}`,
     );
-    throw new DrillValidationError("Invalid drill definition", issues);
+    throw new DrillValidationError(
+      `Invalid drill definition: ${issues.join("; ")}`,
+      issues,
+    );
   }
   const drill = parsed.data;
   if (drill.curriculumLevel < 1 || drill.curriculumLevel > 6) {
@@ -172,7 +175,9 @@ export function stampDrillOnSession(
 /** Parse a user-authored plain-text or Markdown outline into a rehearsal drill draft. */
 export function drillFromOutline(
   outline: string,
-  overrides: Partial<Pick<DrillDefinition, "id" | "name" | "durationTargetSec">> = {},
+  overrides: Partial<
+    Pick<DrillDefinition, "id" | "version" | "name" | "durationTargetSec">
+  > & { phraseStartSec?: number[] } = {},
 ): DrillDefinition {
   const lines = outline
     .split(/\r?\n/)
@@ -182,9 +187,22 @@ export function drillFromOutline(
     throw new DrillValidationError("Outline is empty", ["Provide at least one prompt line"]);
   }
   const durationTargetSec = overrides.durationTargetSec ?? 90;
+  const finalPhraseStart =
+    overrides.phraseStartSec?.[overrides.phraseStartSec.length - 1];
+  if (
+    finalPhraseStart !== undefined &&
+    finalPhraseStart >= durationTargetSec
+  ) {
+    throw new DrillValidationError(
+      "Outline timing exceeds the drill duration",
+      [
+        `last phrase starts at ${finalPhraseStart}s, target duration is ${durationTargetSec}s`,
+      ],
+    );
+  }
   return parseDrillDefinition({
     id: overrides.id ?? `custom-outline-${Date.now()}`,
-    version: 1,
+    version: overrides.version ?? 1,
     name: overrides.name ?? "Custom outline rehearsal",
     mode: "presentation_rehearsal",
     curriculumLevel: 4,
@@ -193,7 +211,8 @@ export function drillFromOutline(
       type: "outline",
       text: lines[0],
       phrases: lines,
-      revealMode: "one_line",
+      revealMode: "phrase_by_phrase",
+      phraseStartSec: overrides.phraseStartSec,
       hideWhenSpeaking: false,
     },
     contactPolicy: {
@@ -219,5 +238,41 @@ export function drillFromOutline(
     reflection: ["Which outline beats pulled your eyes away?"],
     liveAssist: false,
     recordingDefault: "optional",
+  });
+}
+
+function nextDrillVersion(
+  version: DrillDefinition["version"],
+): DrillDefinition["version"] {
+  if (typeof version === "number") return version + 1;
+  const match = /^(.*?)(?:\.revision-(\d+))?$/.exec(version);
+  const base = match?.[1] || version;
+  const revision = Number(match?.[2] ?? 0) + 1;
+  return `${base}.revision-${revision}`;
+}
+
+/**
+ * Create a new custom-outline definition with the same identity and a new
+ * version. Existing session snapshots remain unchanged.
+ */
+export function reviseOutlineDrill(
+  existing: DrillDefinition,
+  outline: string,
+  overrides: Partial<Pick<DrillDefinition, "name" | "durationTargetSec">> & {
+    phraseStartSec?: number[];
+  } = {},
+): DrillDefinition {
+  if (existing.prompt.type !== "outline") {
+    throw new DrillValidationError("Only outline drills can be revised here", [
+      `prompt type is ${existing.prompt.type}`,
+    ]);
+  }
+  return drillFromOutline(outline, {
+    id: existing.id,
+    version: nextDrillVersion(existing.version),
+    name: overrides.name ?? existing.name,
+    durationTargetSec:
+      overrides.durationTargetSec ?? existing.durationTargetSec,
+    phraseStartSec: overrides.phraseStartSec,
   });
 }

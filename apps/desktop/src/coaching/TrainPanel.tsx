@@ -155,20 +155,40 @@ export interface CustomOutlineInput {
   name: string;
   outline: string;
   durationTargetSec: number;
+  phraseStartSec?: number[];
 }
 
 export function CustomDrillImport({
   onCreate,
+  drills = [],
+  onUpdate,
+  onDelete,
   disabled,
 }: {
   onCreate: (input: CustomOutlineInput) => Promise<void>;
+  drills?: DrillDefinition[];
+  onUpdate?: (
+    drill: DrillDefinition,
+    input: CustomOutlineInput,
+  ) => Promise<void>;
+  onDelete?: (drill: DrillDefinition) => Promise<void>;
   disabled?: boolean;
 }) {
   const [name, setName] = useState("");
   const [outline, setOutline] = useState("");
   const [durationTargetSec, setDurationTargetSec] = useState(90);
+  const [phraseStartText, setPhraseStartText] = useState("");
+  const [editingId, setEditingId] = useState<string>();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string>();
+
+  const reset = () => {
+    setName("");
+    setOutline("");
+    setDurationTargetSec(90);
+    setPhraseStartText("");
+    setEditingId(undefined);
+  };
 
   const submit = async () => {
     if (!outline.trim()) {
@@ -178,13 +198,59 @@ export function CustomDrillImport({
     setSaving(true);
     setError(undefined);
     try {
-      await onCreate({
+      const phraseStartSec = phraseStartText.trim()
+        ? phraseStartText
+            .split(",")
+            .map((value) => Number(value.trim()))
+        : undefined;
+      if (phraseStartSec?.some((value) => !Number.isFinite(value))) {
+        throw new Error("Beat start times must be comma-separated numbers.");
+      }
+      const input = {
         name: name.trim() || "Custom outline rehearsal",
         outline,
         durationTargetSec,
-      });
-      setName("");
-      setOutline("");
+        phraseStartSec,
+      };
+      const existing = drills.find((drill) => drill.id === editingId);
+      if (existing && onUpdate) {
+        await onUpdate(existing, input);
+      } else {
+        await onCreate(input);
+      }
+      reset();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const edit = (drill: DrillDefinition) => {
+    setEditingId(drill.id);
+    setName(drill.name);
+    setDurationTargetSec(drill.durationTargetSec);
+    setOutline(
+      drill.prompt.phrases?.join("\n") || drill.prompt.text,
+    );
+    setPhraseStartText(drill.prompt.phraseStartSec?.join(", ") ?? "");
+    setError(undefined);
+  };
+
+  const remove = async (drill: DrillDefinition) => {
+    if (
+      !onDelete ||
+      !window.confirm(
+        `Delete “${drill.name}”? Past sessions keep their saved drill snapshot.`,
+      )
+    ) {
+      return;
+    }
+    setSaving(true);
+    setError(undefined);
+    try {
+      await onDelete(drill);
+      if (editingId === drill.id) reset();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
@@ -194,9 +260,11 @@ export function CustomDrillImport({
 
   return (
     <details className="panel custom-drill-import">
-      <summary>Import a rehearsal outline</summary>
+      <summary>Custom rehearsal outlines ({drills.length})</summary>
       <p className="muted">
-        Paste plain text or Markdown. Each heading or bullet becomes a lens-adjacent outline beat.
+        Paste plain text or Markdown. Each heading or bullet becomes a
+        lens-adjacent outline beat. Editing creates a new drill version; past
+        sessions retain their original snapshot.
       </p>
       <label>
         Drill name
@@ -231,6 +299,19 @@ export function CustomDrillImport({
           onChange={(event) => setOutline(event.target.value)}
         />
       </label>
+      <label>
+        Beat start times in seconds (optional)
+        <input
+          value={phraseStartText}
+          disabled={disabled || saving}
+          placeholder="0, 15, 45"
+          onChange={(event) => setPhraseStartText(event.target.value)}
+        />
+      </label>
+      <p className="muted">
+        Enter one increasing start time per outline beat, beginning with 0.
+        Leave blank to advance beats at the default interval.
+      </p>
       {error && <p className="tracking-warning">{error}</p>}
       <button
         type="button"
@@ -238,8 +319,48 @@ export function CustomDrillImport({
         disabled={disabled || saving}
         onClick={() => void submit()}
       >
-        {saving ? "Saving…" : "Create rehearsal drill"}
+        {saving
+          ? "Saving…"
+          : editingId
+            ? "Save new drill version"
+            : "Create rehearsal drill"}
       </button>
+      {editingId && (
+        <button
+          type="button"
+          className="secondary"
+          disabled={disabled || saving}
+          onClick={reset}
+        >
+          Cancel edit
+        </button>
+      )}
+      {drills.map((drill) => (
+        <div className="cue-rating-row" key={drill.id}>
+          <span>
+            {drill.name} · v{drill.version} · {drill.durationTargetSec}s ·{" "}
+            {drill.prompt.phrases?.length ?? 1} beats
+          </span>
+          <div className="button-row">
+            <button
+              type="button"
+              className="secondary"
+              disabled={disabled || saving}
+              onClick={() => edit(drill)}
+            >
+              Edit
+            </button>
+            <button
+              type="button"
+              className="secondary"
+              disabled={disabled || saving}
+              onClick={() => void remove(drill)}
+            >
+              Delete
+            </button>
+          </div>
+        </div>
+      ))}
     </details>
   );
 }

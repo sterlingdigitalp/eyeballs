@@ -222,14 +222,44 @@ export const drillContactPolicySchema = z.object({
 });
 export type DrillContactPolicy = z.infer<typeof drillContactPolicySchema>;
 
-export const drillPromptSchema = z.object({
-  type: z.enum(["none", "text", "question", "outline", "comment"]),
-  text: z.string().default(""),
-  phrases: z.array(z.string().min(1)).optional(),
-  revealMode: z.enum(promptRevealModes).default("one_line"),
-  revealSec: z.number().nonnegative().optional(),
-  hideWhenSpeaking: z.boolean().default(false),
-});
+export const drillPromptSchema = z
+  .object({
+    type: z.enum(["none", "text", "question", "outline", "comment"]),
+    text: z.string().default(""),
+    phrases: z.array(z.string().min(1)).optional(),
+    revealMode: z.enum(promptRevealModes).default("one_line"),
+    revealSec: z.number().nonnegative().optional(),
+    /** Optional start time for each phrase, aligned by array index. */
+    phraseStartSec: z.array(z.number().nonnegative()).optional(),
+    hideWhenSpeaking: z.boolean().default(false),
+  })
+  .superRefine((prompt, context) => {
+    if (!prompt.phraseStartSec) return;
+    if (!prompt.phrases || prompt.phraseStartSec.length !== prompt.phrases.length) {
+      context.addIssue({
+        code: "custom",
+        message: "phraseStartSec must contain one start time per phrase",
+        path: ["phraseStartSec"],
+      });
+      return;
+    }
+    if (prompt.phraseStartSec[0] !== 0) {
+      context.addIssue({
+        code: "custom",
+        message: "the first phrase must start at 0 seconds",
+        path: ["phraseStartSec", 0],
+      });
+    }
+    prompt.phraseStartSec.forEach((startSec, index) => {
+      if (index > 0 && startSec <= prompt.phraseStartSec![index - 1]) {
+        context.addIssue({
+          code: "custom",
+          message: "phrase start times must be strictly increasing",
+          path: ["phraseStartSec", index],
+        });
+      }
+    });
+  });
 export type DrillPrompt = z.infer<typeof drillPromptSchema>;
 
 export const drillScoringSchema = z.object({

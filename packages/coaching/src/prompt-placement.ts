@@ -85,10 +85,27 @@ export function resolvePromptReveal(input: PromptRevealInput): PromptRevealState
 
   let phraseIndex = 0;
   if (mode === "phrase_by_phrase") {
-    const perPhrase = Math.max(revealSec || 4, 1);
-    phraseIndex =
-      input.phraseIndex ??
-      Math.min(phrases.length - 1, Math.floor(input.elapsedSec / perPhrase));
+    if (input.phraseIndex !== undefined) {
+      phraseIndex = Math.min(
+        phrases.length - 1,
+        Math.max(0, input.phraseIndex),
+      );
+    } else if (input.drill.prompt.phraseStartSec?.length === phrases.length) {
+      for (
+        let index = 1;
+        index < input.drill.prompt.phraseStartSec.length;
+        index += 1
+      ) {
+        if (input.elapsedSec < input.drill.prompt.phraseStartSec[index]) break;
+        phraseIndex = index;
+      }
+    } else {
+      const perPhrase = Math.max(revealSec || 4, 1);
+      phraseIndex = Math.min(
+        phrases.length - 1,
+        Math.floor(input.elapsedSec / perPhrase),
+      );
+    }
   }
 
   const text =

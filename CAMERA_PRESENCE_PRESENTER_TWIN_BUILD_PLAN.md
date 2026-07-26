@@ -1989,6 +1989,9 @@ Implemented and covered by device-free tests:
 - versioned drill schema and the complete ten-drill starter library;
 - durable plain-text/Markdown outline import with an immutable drill snapshot
   stored on every coached session;
+- durable custom-outline editing and deletion, with version increments,
+  immutable historical session snapshots, and optional explicit start time for
+  every lens-adjacent outline beat;
 - restrained feedback engine with blink/unknown suppression, cooldowns,
   evidence logs, cue ratings, and recovery handling;
 - lens-adjacent prompt width, reveal modes, and large-text mode;
@@ -2025,7 +2028,6 @@ Still requiring live validation after CaptureCore releases the Brio and Yeti:
 
 Still open for later Phase 2 slices:
 
-- custom-drill editing/deletion and richer per-beat timing controls;
 - local ASR worker integration and automatic transcript attachment;
 - optional non-manipulative practice-streak decision;
 - real transparent always-on-top Tauri live-assist window and global shortcut.
@@ -2041,6 +2043,8 @@ Tasks:
 - [x] Preserve drill version and immutable drill content in each session.
 - [x] Support custom user-authored prompts.
 - [x] Add durable import from plain text or Markdown outline for presentation rehearsal.
+- [x] Edit and delete custom outline drills without mutating historical session snapshots.
+- [x] Support optional explicit start times for each custom outline beat.
 
 Initial built-in drill set:
 

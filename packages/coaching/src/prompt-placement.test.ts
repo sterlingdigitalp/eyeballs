@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseDrillDefinition } from "./drills";
+import { drillFromOutline, parseDrillDefinition } from "./drills";
 import {
   placeLensAdjacentPrompt,
   promptRegionStyle,
@@ -69,5 +69,37 @@ describe("prompt reveal modes", () => {
       speaking: true,
     });
     expect(hidden.hidden).toBe(true);
+  });
+
+  it("uses explicit per-beat start times for custom rehearsal outlines", () => {
+    const custom = drillFromOutline(
+      "- Opening\n- Evidence\n- Close",
+      {
+        durationTargetSec: 60,
+        phraseStartSec: [0, 12, 45],
+      },
+    );
+
+    expect(
+      resolvePromptReveal({
+        drill: custom,
+        elapsedSec: 11.9,
+        speaking: false,
+      }).visibleText,
+    ).toBe("Opening");
+    expect(
+      resolvePromptReveal({
+        drill: custom,
+        elapsedSec: 12,
+        speaking: false,
+      }).visibleText,
+    ).toBe("Evidence");
+    expect(
+      resolvePromptReveal({
+        drill: custom,
+        elapsedSec: 50,
+        speaking: false,
+      }).visibleText,
+    ).toBe("Close");
   });
 });
