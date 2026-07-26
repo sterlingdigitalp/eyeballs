@@ -1969,6 +1969,8 @@ Implemented and covered by device-free tests:
   and Markdown/JSON session reports;
 - synchronized Review evidence lanes with 1×/2×/4×/8× zoom, keyboard seeking,
   and durable timestamped bookmark annotations;
+- accessible rolling sparklines for every like-for-like Progress metric, while
+  retaining baseline identity and measurement-degradation warnings;
 - hands-free drill guidance: spoken instruction, four-second settle interval,
   distinct start tone, automatic timed-drill completion, and completion chime;
 - display/profile prompt binding using Tauri monitor geometry, with a warning
@@ -1986,7 +1988,7 @@ Still open for later Phase 2 slices:
 - custom-drill editing/deletion and richer per-beat timing controls;
 - local ASR and editable sentence alignment;
 - editable transcript/sentence boundaries and explicit clip in/out controls;
-- rolling progress visualization;
+- optional non-manipulative practice-streak decision;
 - real transparent always-on-top Tauri live-assist window and global shortcut.
 
 ### 12.3 Work package P2-A — Drill engine
@@ -2091,7 +2093,7 @@ Tasks:
 
 - [x] Define comparable-session grouping by drill, profile, and feedback mode.
 - [x] Store metrics with scoring-policy version.
-- [ ] Show rolling trends without implying medical significance.
+- [x] Show accessible rolling trends without implying medical significance.
 - [x] Add baseline session.
 - [x] Add user comfort rating before/after session.
 - [x] Highlight measurement degradation separately from performance change.

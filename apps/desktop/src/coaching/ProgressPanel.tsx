@@ -9,6 +9,39 @@ import {
   type Recommendation,
 } from "../../../../packages/coaching/src";
 import { store, type StoredSession } from "../lib/store";
+import {
+  sparklinePoints,
+  sparklinePolyline,
+} from "./trend-sparkline";
+
+function TrendSparkline({
+  values,
+  label,
+}: {
+  values: readonly number[];
+  label: string;
+}) {
+  if (!values.length) return null;
+  const points = sparklinePoints(values);
+  return (
+    <svg
+      className="trend-sparkline"
+      viewBox="0 0 120 32"
+      role="img"
+      aria-label={`${label}: ${values.length} comparable session${values.length === 1 ? "" : "s"}`}
+    >
+      <polyline points={sparklinePolyline(points)} />
+      {points.map((point, index) => (
+        <circle
+          key={`${point.x}-${index}`}
+          cx={point.x}
+          cy={point.y}
+          r={index === points.length - 1 ? 2.8 : 1.8}
+        />
+      ))}
+    </svg>
+  );
+}
 
 export function ProgressPanel({
   sessions,
@@ -223,10 +256,18 @@ export function ProgressPanel({
                   ? `${((group.trends.contactDuringSpeaking.at(-1) as number) * 100).toFixed(0)}%`
                   : "— (need VAD windows)"}
               </strong>
+              <TrendSparkline
+                values={group.trends.contactDuringSpeaking}
+                label="Contact while speaking trend"
+              />
             </div>
             <div className="progress-card">
               Breaks / min
               <strong>{group.trends.breaksPerMinute.at(-1)?.toFixed(1) ?? "—"}</strong>
+              <TrendSparkline
+                values={group.trends.breaksPerMinute}
+                label="Breaks per minute trend"
+              />
             </div>
             <div className="progress-card">
               Median break
@@ -235,10 +276,18 @@ export function ProgressPanel({
                   ? `${Math.round(group.trends.medianBreakMs.at(-1) as number)} ms`
                   : "—"}
               </strong>
+              <TrendSparkline
+                values={group.trends.medianBreakMs}
+                label="Median break duration trend"
+              />
             </div>
             <div className="progress-card">
               Comfort after
               <strong>{group.trends.comfortAfter.at(-1) ?? "—"}</strong>
+              <TrendSparkline
+                values={group.trends.comfortAfter}
+                label="Comfort trend"
+              />
             </div>
             <div className="progress-card">
               Tracking confidence
@@ -247,6 +296,10 @@ export function ProgressPanel({
                   ? `${((group.trends.trackingConfidence.at(-1) as number) * 100).toFixed(0)}%`
                   : "—"}
               </strong>
+              <TrendSparkline
+                values={group.trends.trackingConfidence}
+                label="Tracking confidence trend"
+              />
             </div>
           </div>
           <p className="muted">{group.points.length} comparable session(s)</p>
