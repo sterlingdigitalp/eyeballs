@@ -3,15 +3,23 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   Calibration,
   CaptureProfile,
+  ClipCandidate,
+  ConsentRecord,
   Correction,
+  CueEvent,
   GazeEvent,
   GazePrediction,
+  RecommendationFeedback,
   SessionManifest,
   FeatureVector,
+  SpeakingWindowRecord,
 } from "../../../../packages/contracts/src";
 import {
   calibrationSchema,
   captureProfileSchema,
+  clipCandidateSchema,
+  consentRecordSchema,
+  recommendationFeedbackSchema,
 } from "../../../../packages/contracts/src";
 import {
   mergeStoredSessions,
@@ -28,6 +36,8 @@ export interface StoredSession {
   predictions: GazePrediction[];
   events: GazeEvent[];
   corrections: Correction[];
+  cues?: CueEvent[];
+  speakingWindows?: SpeakingWindowRecord[];
   media?: Blob;
 }
 
@@ -84,6 +94,11 @@ function db(): Promise<IDBPDatabase<CoachDatabase>> {
   });
   return database;
 }
+
+const SETTINGS_CONSENTS = "consents";
+const SETTINGS_CLIPS = "datasetClips";
+const SETTINGS_RECOMMENDATIONS = "recommendationFeedback";
+const SETTINGS_DATASET_VERSIONS = "datasetVersions";
 
 export const store = {
   profiles: {
@@ -160,6 +175,67 @@ export const store = {
     put: async (key: string, value: unknown) => {
       await (await db()).put("settings", value, key);
       await nativePut("settings", key, value);
+    },
+  },
+  consents: {
+    all: async (): Promise<ConsentRecord[]> => {
+      const raw =
+        (await nativeGet<unknown[]>(SETTINGS_CONSENTS, "all")) ??
+        (await store.settings.get<unknown[]>(SETTINGS_CONSENTS)) ??
+        [];
+      return parseRecordList(consentRecordSchema, raw, "consent");
+    },
+    putAll: async (records: ConsentRecord[]) => {
+      await store.settings.put(SETTINGS_CONSENTS, records);
+      await nativePut(SETTINGS_CONSENTS, "all", records);
+    },
+  },
+  clips: {
+    all: async (): Promise<ClipCandidate[]> => {
+      const raw =
+        (await nativeGet<unknown[]>(SETTINGS_CLIPS, "all")) ??
+        (await store.settings.get<unknown[]>(SETTINGS_CLIPS)) ??
+        [];
+      return parseRecordList(clipCandidateSchema, raw, "clip");
+    },
+    putAll: async (clips: ClipCandidate[]) => {
+      await store.settings.put(SETTINGS_CLIPS, clips);
+      await nativePut(SETTINGS_CLIPS, "all", clips);
+    },
+  },
+  recommendationFeedback: {
+    all: async (): Promise<RecommendationFeedback[]> => {
+      const raw =
+        (await nativeGet<unknown[]>(SETTINGS_RECOMMENDATIONS, "all")) ??
+        (await store.settings.get<unknown[]>(SETTINGS_RECOMMENDATIONS)) ??
+        [];
+      return parseRecordList(recommendationFeedbackSchema, raw, "recommendation");
+    },
+    putAll: async (records: RecommendationFeedback[]) => {
+      await store.settings.put(SETTINGS_RECOMMENDATIONS, records);
+      await nativePut(SETTINGS_RECOMMENDATIONS, "all", records);
+    },
+    upsert: async (record: RecommendationFeedback) => {
+      const existing = await store.recommendationFeedback.all();
+      const next = [
+        record,
+        ...existing.filter((entry) => entry.recommendationId !== record.recommendationId),
+      ];
+      await store.recommendationFeedback.putAll(next);
+      return next;
+    },
+  },
+  datasetVersions: {
+    all: async (): Promise<unknown[]> => {
+      return (
+        (await nativeGet<unknown[]>(SETTINGS_DATASET_VERSIONS, "all")) ??
+        (await store.settings.get<unknown[]>(SETTINGS_DATASET_VERSIONS)) ??
+        []
+      );
+    },
+    putAll: async (versions: unknown[]) => {
+      await store.settings.put(SETTINGS_DATASET_VERSIONS, versions);
+      await nativePut(SETTINGS_DATASET_VERSIONS, "all", versions);
     },
   },
 };

@@ -3,13 +3,20 @@ import type {
   Calibration,
   CalibrationTarget,
   CaptureProfile,
+  ClipCandidate,
+  ConsentRecord,
   Correction,
+  CueEvent,
+  DatasetIntent,
   DeviceInventory,
+  DrillDefinition,
   FeatureFlags,
   FeatureVector,
+  FeedbackIntensity,
   GazeEvent,
   GazePrediction,
   GazeState,
+  RecordingAsset,
   SessionManifest,
 } from "../../../packages/contracts/src";
 import { gazePredictionSchema } from "../../../packages/contracts/src";
@@ -42,6 +49,49 @@ import {
   recordingFinalization,
   recoverInterruptedSession,
 } from "../../../packages/measurement/src/recovery";
+import {
+  applyReflectionToSession,
+  beginCountdown,
+  buildCoachedManifest,
+  buildReviewLanes,
+  buildSessionReport,
+  contactColor,
+  createTrainSession,
+  defaultRecordingIntent,
+  emergencyStop,
+  FeedbackPolicyEngine,
+  finishReflection,
+  getDrillById,
+  loadBuiltinDrills,
+  noteWindowsFromDrill,
+  rateSessionCue,
+  requestStop,
+  restartSafeRecordingFlag,
+  seekSecondsFromTimelineUs,
+  speakingSeconds,
+  tickActive,
+  tickCountdown,
+  type TrainSessionState,
+} from "../../../packages/coaching/src";
+import {
+  attachDatasetIntent,
+  evaluatePreflight,
+  proposeSegments,
+} from "../../../packages/dataset/src";
+import {
+  DrillSetupForm,
+  LensAdjacentPromptOverlay,
+  ReflectionForm,
+  RecordingPrivacyBadge,
+  TrainActiveChrome,
+} from "./coaching/TrainPanel";
+import { useBuiltinDrills } from "./coaching/useBuiltinDrills";
+import { useSpeakingVad } from "./coaching/useSpeakingVad";
+import { ProgressPanel } from "./coaching/ProgressPanel";
+import { LiveAssistHud } from "./coaching/LiveAssistHud";
+import { ConsentPanel } from "./dataset/ConsentPanel";
+import { CuratePanel } from "./dataset/CuratePanel";
+import { DatasetPanel } from "./dataset/DatasetPanel";
 import {
   describeMediaError,
   enumerateDevices,
@@ -83,7 +133,15 @@ import {
 } from "./tracking/provider";
 import "./styles.css";
 
-type Page = "setup" | "calibrate" | "measure" | "review";
+type Page =
+  | "setup"
+  | "calibrate"
+  | "measure"
+  | "review"
+  | "progress"
+  | "consent"
+  | "curate"
+  | "dataset";
 const NO_MICROPHONE_ID = "__none__";
 const SESSION_CHECKPOINT_INTERVAL_US = 5_000_000;
 const VIDEO_MODE_OPTIONS: Array<{
@@ -241,6 +299,9 @@ function VideoPreview({
   onFirstFrame,
   calibrationGuide,
   showLensAnchor = true,
+  promptOverlay,
+  cuePulse,
+  className,
 }: {
   stream?: MediaStream;
   videoRef: React.RefObject<HTMLVideoElement | null>;
@@ -250,13 +311,16 @@ function VideoPreview({
   onFirstFrame?: () => void;
   calibrationGuide?: { x: number; y: number; label: string };
   showLensAnchor?: boolean;
+  promptOverlay?: React.ReactNode;
+  cuePulse?: boolean;
+  className?: string;
 }) {
   useEffect(() => {
     if (videoRef.current) videoRef.current.srcObject = stream ?? null;
   }, [stream, videoRef]);
   return (
     <div
-      className={`preview ${state ?? ""} ${onLensAnchorChange ? "anchor-editable" : ""}`}
+      className={`preview ${state ?? ""} ${onLensAnchorChange ? "anchor-editable" : ""} ${cuePulse ? "cue-pulse" : ""} ${className ?? ""}`}
       onClick={(event) => {
         if (!onLensAnchorChange) return;
         const bounds = event.currentTarget.getBoundingClientRect();
@@ -289,6 +353,7 @@ function VideoPreview({
           <b>{calibrationGuide.label}</b>
         </span>
       )}
+      {promptOverlay}
       {state && <div className="state-halo" aria-live="polite">{stateLabel[state]}</div>}
       {!stream && <div className="preview-empty">Camera preview is off</div>}
     </div>
@@ -1073,6 +1138,11 @@ function Measure({
   onSession,
   debug,
   calibrationIssue,
+  onLiveAssistSnapshot,
+  consents,
+  onClipsProposed,
+  followedRecommendationId,
+  initialDrillId,
 }: {
   profile?: CaptureProfile;
   calibration?: Calibration;
@@ -1082,9 +1152,19 @@ function Measure({
   onSession: (session: StoredSession) => void;
   debug: boolean;
   calibrationIssue?: string;
+  onLiveAssistSnapshot?: (snapshot: {
+    state?: GazeState;
+    recording: boolean;
+    liveAssist: boolean;
+  }) => void;
+  consents: ConsentRecord[];
+  onClipsProposed?: (clips: ClipCandidate[]) => void;
+  followedRecommendationId?: string;
+  initialDrillId?: string;
 }) {
   const model = useMemo(() => calibration ? trainClassifier(calibration) : undefined, [calibration]);
   const pipeline = useRef<MeasurementPipeline | undefined>(undefined);
+  const policyRef = useRef<FeedbackPolicyEngine | undefined>(undefined);
   const [prediction, setPrediction] = useState<GazePrediction>();
   const [lastFeature, setLastFeature] = useState<FeatureVector>();
   const [testing, setTesting] = useState(false);
@@ -1094,6 +1174,7 @@ function Measure({
   const predictions = useRef<GazePrediction[]>([]);
   const features = useRef<FeatureVector[]>([]);
   const events = useRef<GazeEvent[]>([]);
+  const cues = useRef<CueEvent[]>([]);
   const recorder = useRef<MediaRecorder | undefined>(undefined);
   const chunks = useRef<Blob[]>([]);
   const recordRequested = useRef(false);
@@ -1108,6 +1189,65 @@ function Measure({
     async () => undefined,
   );
   const [captureFailure, setCaptureFailure] = useState<string>();
+  const drills = useBuiltinDrills();
+  const [selectedDrillId, setSelectedDrillId] = useState(
+    initialDrillId ?? drills[0]?.id ?? "",
+  );
+  const selectedDrill = drills.find((drill) => drill.id === selectedDrillId) ?? drills[0];
+  const [intensity, setIntensity] = useState<FeedbackIntensity>(
+    selectedDrill?.contactPolicy.feedbackLevel ?? "standard",
+  );
+  const [sessionGoal, setSessionGoal] = useState("");
+  const [comfortBefore, setComfortBefore] = useState(3);
+  const [wantRecord, setWantRecord] = useState(false);
+  const [largeText, setLargeText] = useState(false);
+  const [liveAssist, setLiveAssist] = useState(false);
+  const [datasetIntent, setDatasetIntent] = useState<DatasetIntent>("none");
+  const [outfitLabel, setOutfitLabel] = useState("");
+  const [backgroundLabel, setBackgroundLabel] = useState("");
+  const [preflightMessage, setPreflightMessage] = useState<string>();
+
+  useEffect(() => {
+    if (initialDrillId) setSelectedDrillId(initialDrillId);
+  }, [initialDrillId]);
+  const [train, setTrain] = useState<TrainSessionState | undefined>();
+  const [lastCueKind, setLastCueKind] = useState<string>();
+  const [cueCount, setCueCount] = useState(0);
+  const [sessionCues, setSessionCues] = useState<CueEvent[]>([]);
+  const [manualSpeaking, setManualSpeaking] = useState(false);
+  const trainRef = useRef<TrainSessionState | undefined>(undefined);
+  const activeStartMs = useRef<number | undefined>(undefined);
+  const beginMediaRef = useRef<() => void>(() => undefined);
+  const lastSavedSessionRef = useRef<StoredSession | undefined>(undefined);
+  const speakingSecRef = useRef(0);
+  // Never resume recording after restart — always start from false.
+  useEffect(() => {
+    const initial = selectedDrill ?? drills[0];
+    if (initial) {
+      setWantRecord(restartSafeRecordingFlag(null) || defaultRecordingIntent(initial));
+    }
+    // Intentionally once on mount so restart never re-enables recording from prior UI state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only restart safety
+  }, []);
+
+  useEffect(() => {
+    trainRef.current = train;
+  }, [train]);
+
+  const vad = useSpeakingVad(microphoneStream, testing);
+  const speaking = vad.speaking || manualSpeaking;
+
+  useEffect(() => {
+    speakingSecRef.current = speakingSeconds(vad.windows);
+  }, [vad.windows]);
+
+  useEffect(() => {
+    onLiveAssistSnapshot?.({
+      state: testing ? prediction?.state : undefined,
+      recording,
+      liveAssist,
+    });
+  }, [liveAssist, onLiveAssistSnapshot, prediction?.state, recording, testing]);
 
   const liveTracker = useTracker(videoRef, Boolean(cameraStream && model && testing), (feature) => {
     if (!model) return;
@@ -1131,6 +1271,44 @@ function Measure({
     setPrediction(next);
     predictions.current.push(next);
     events.current.push(...frame.completedEvents);
+    policyRef.current?.observeEvents(frame.completedEvents);
+    const openBreak = events.current
+      .filter((event) => event.type === "break" && event.endUs === undefined)
+      .at(-1);
+    const openBreakDurationMs = openBreak
+      ? Math.max(0, (feature.timestampUs - openBreak.startUs) / 1000)
+      : next.state === "off_lens"
+        ? 0
+        : 0;
+    const recoveryJustOccurred = frame.completedEvents.some((event) => event.type === "recovery");
+    const sessionRelativeUs = manifest.current
+      ? feature.timestampUs - manifest.current.monotonicStartUs
+      : feature.timestampUs;
+    const cue = policyRef.current?.evaluate({
+      prediction: next,
+      openBreakDurationMs:
+        openBreakDurationMs ||
+        (next.state === "off_lens" && openBreak
+          ? (feature.timestampUs - openBreak.startUs) / 1000
+          : next.state === "off_lens"
+            ? 0
+            : 0),
+      recoveryJustOccurred,
+      speaking,
+      sessionRelativeUs,
+      noteAllowedWindows: selectedDrill && manifest.current
+        ? noteWindowsFromDrill(selectedDrill, 0)
+        : [],
+      blink: feature.blink,
+      intensity,
+    });
+    if (cue) {
+      cues.current.push(cue);
+      setCueCount(cues.current.length);
+      setSessionCues([...cues.current]);
+      setLastCueKind(cue.kind);
+      window.setTimeout(() => setLastCueKind(undefined), 450);
+    }
     if (
       manifest.current &&
       feature.timestampUs - lastCheckpoint.current >= SESSION_CHECKPOINT_INTERVAL_US
@@ -1143,6 +1321,7 @@ function Measure({
         predictions: [...predictions.current],
         events: [...events.current],
         corrections: [],
+        cues: [...cues.current],
       }).catch((cause) => {
         void logEvent("session_checkpoint_failed", {
           correlationId: manifest.current?.id,
@@ -1156,28 +1335,51 @@ function Measure({
     }
   });
 
-  const start = (record: boolean) => {
+  const start = (record: boolean, drill?: DrillDefinition) => {
     if (!profile || !calibration || !cameraStream || !model) return;
+    const activeDrill = drill ?? selectedDrill ?? loadBuiltinDrills()[0];
+    if (!activeDrill) return;
+    const trainState = createTrainSession({
+      drill: activeDrill,
+      feedbackIntensity: intensity,
+      sessionGoal: sessionGoal || undefined,
+      comfortBefore,
+      record,
+      liveAssist,
+    });
+    const counting = beginCountdown(trainState);
+    setTrain(counting);
+    trainRef.current = counting;
     predictions.current = [];
     features.current = [];
     events.current = [];
+    cues.current = [];
+    setCueCount(0);
+    setSessionCues([]);
+    lastSavedSessionRef.current = undefined;
+    speakingSecRef.current = 0;
     pipeline.current = new MeasurementPipeline(model);
+    policyRef.current = new FeedbackPolicyEngine({
+      drill: activeDrill,
+      intensity,
+    });
     stopping.current = false;
     finalizedSessionId.current = undefined;
     setTesting(true);
-    setRecording(record);
+    setRecording(false);
     setLatencyHistory([]);
     setLiveDroppedFrames(0);
-    recordRequested.current = record;
+    recordRequested.current = counting.config.record;
     recorderError.current = undefined;
     mediaStartedAtUs.current = undefined;
+    activeStartMs.current = undefined;
     droppedFramesAtStart.current =
       typeof videoRef.current?.getVideoPlaybackQuality === "function"
         ? videoRef.current.getVideoPlaybackQuality().droppedVideoFrames
         : 0;
     setCaptureFailure(undefined);
     const startedAt = new Date();
-    manifest.current = {
+    const baseManifest: SessionManifest = {
       schemaVersion: "1.0.0",
       id: crypto.randomUUID(),
       profileId: profile.id,
@@ -1191,6 +1393,39 @@ function Measure({
       frameCount: 0,
       droppedFrameCount: 0,
     };
+    let coached = buildCoachedManifest(baseManifest, counting);
+    if (followedRecommendationId) {
+      coached = { ...coached, followedRecommendationId };
+    }
+    if (datasetIntent !== "none") {
+      const recordingConsent = consents.find(
+        (entry) => !entry.revokedAt && entry.scopes.includes("recording"),
+      );
+      const datasetConsent = consents.find(
+        (entry) => !entry.revokedAt && entry.scopes.includes("dataset_include"),
+      );
+      coached = attachDatasetIntent(coached, datasetIntent, {
+        recordingConsentId: recordingConsent?.id,
+        datasetConsentId: datasetConsent?.id,
+        faceAnalysisConsentId: consents.find(
+          (entry) => !entry.revokedAt && entry.scopes.includes("face_analysis"),
+        )?.id,
+        voiceAnalysisConsentId: consents.find(
+          (entry) => !entry.revokedAt && entry.scopes.includes("voice_analysis"),
+        )?.id,
+      });
+      if (coached.dataset) {
+        coached = {
+          ...coached,
+          dataset: {
+            ...coached.dataset,
+            outfitLabel: outfitLabel || undefined,
+            backgroundLabel: backgroundLabel || undefined,
+          },
+        };
+      }
+    }
+    manifest.current = coached;
     lastCheckpoint.current = manifest.current.monotonicStartUs;
     void store.sessions.put({
       manifest: manifest.current,
@@ -1199,6 +1434,7 @@ function Measure({
       predictions: [],
       events: [],
       corrections: [],
+      cues: [],
     }).catch((cause) => {
       const message = `Initial session checkpoint failed: ${
         cause instanceof Error ? cause.message : String(cause)
@@ -1210,7 +1446,8 @@ function Measure({
         fields: { stage: "initial", error: message },
       });
     });
-    if (record) {
+    const beginMediaIfNeeded = () => {
+      if (!recordRequested.current || !cameraStream) return;
       try {
         const tracks = [
           ...cameraStream.getVideoTracks(),
@@ -1247,6 +1484,7 @@ function Measure({
         };
         mediaStartedAtUs.current = Math.round(performance.now() * 1000);
         mediaRecorder.start(1000);
+        setRecording(true);
       } catch (cause) {
         const message = `Media recorder could not start: ${
           cause instanceof Error ? cause.message : String(cause)
@@ -1254,27 +1492,41 @@ function Measure({
         recorderError.current = message;
         setCaptureFailure(message);
         void logEvent("media_recorder_start_failed", {
-          correlationId: manifest.current.id,
+          correlationId: manifest.current?.id,
           level: "error",
           fields: { error: message },
         });
         void stopRef.current("incomplete", message);
       }
-    }
+    };
+    beginMediaRef.current = beginMediaIfNeeded;
     void logEvent("measurement_started", {
       correlationId: manifest.current.id,
       fields: {
         profileId: profile.id,
         calibrationId: calibration.id,
-        record,
+        drillId: activeDrill.id,
+        record: recordRequested.current,
       },
     });
   };
+
+  const vadFinishRef = useRef(vad.finish);
+  useEffect(() => {
+    vadFinishRef.current = vad.finish;
+  }, [vad.finish]);
 
   const stop = useCallback(async (status: "complete" | "incomplete" = "complete", recoveryNote?: string) => {
     const activeManifest = manifest.current;
     if (!activeManifest || stopping.current) return;
     stopping.current = true;
+    // Close VAD windows before disabling tracking so speaking seconds are available for completion.
+    const closedWindows = vadFinishRef.current();
+    speakingSecRef.current = speakingSeconds(closedWindows);
+    const speakingWindows = closedWindows.map((window) => ({
+      startUs: window.startUs,
+      endUs: window.endUs,
+    }));
     manifest.current = { ...activeManifest, status: "finalizing" };
     try {
       await store.sessions.put({
@@ -1284,6 +1536,8 @@ function Measure({
         predictions: [...predictions.current],
         events: [...events.current],
         corrections: [],
+        cues: [...cues.current],
+        speakingWindows,
       });
     } catch (cause) {
       const message = `Finalizing checkpoint failed: ${
@@ -1320,9 +1574,13 @@ function Measure({
                 droppedFramesAtStart.current,
             )
           : 0;
+      const trainSnapshot = trainRef.current;
+      const coachedManifest = trainSnapshot
+        ? buildCoachedManifest(activeManifest, trainSnapshot)
+        : activeManifest;
       const complete: StoredSession = {
         manifest: {
-          ...activeManifest,
+          ...coachedManifest,
           endedAt: endedAt.toISOString(),
           status: finalStatus,
           frameCount: predictions.current.length,
@@ -1347,8 +1605,39 @@ function Measure({
         predictions: predictions.current,
         events: events.current,
         corrections: [],
+        cues: [...cues.current],
+        speakingWindows,
         media,
       };
+      // Auto-propose clip ranges for dataset-intent sessions (ranges only, no media copy).
+      if (
+        complete.manifest.dataset?.intent === "dataset_candidate" ||
+        complete.manifest.dataset?.intent === "coaching_only"
+      ) {
+        const durationUs =
+          complete.manifest.media?.durationUs ??
+          Math.max(
+            0,
+            (predictions.current.at(-1)?.timestampUs ?? 0) -
+              complete.manifest.monotonicStartUs,
+          );
+        const proposals = proposeSegments({
+          sessionId: complete.manifest.id,
+          durationUs: durationUs || 30_000_000,
+          speakingWindows,
+          events: events.current,
+          predictions: predictions.current,
+        }).map((proposal) => ({
+          id: proposal.id,
+          sessionId: proposal.sessionId,
+          startUs: proposal.startUs,
+          endUs: proposal.endUs,
+          reasonTags: proposal.reasons,
+          proposedBy: "auto" as const,
+          pointsIntoMaster: true as const,
+        }));
+        if (proposals.length) onClipsProposed?.(proposals);
+      }
       let savedSession = complete;
       try {
         await store.sessions.put(complete);
@@ -1371,12 +1660,35 @@ function Measure({
           fields: { error: message },
         });
       }
+      lastSavedSessionRef.current = savedSession;
       onSession(savedSession);
       setRecording(false);
       setPrediction(undefined);
       recorder.current = undefined;
       manifest.current = undefined;
       stopping.current = false;
+      // Preserve reflect/stopped train chrome for post-session notes; re-save after reflection.
+      setTrain((current) => {
+        if (!current) return current;
+        if (current.emergencyStopped || current.phase === "stopped") {
+          const finished = finishReflection(
+            current,
+            current.reflectionNotes,
+            current.comfortAfter,
+            speakingSecRef.current,
+          );
+          const updated = applyReflectionToSession(savedSession, finished);
+          lastSavedSessionRef.current = updated;
+          void store.sessions.put(updated).then(() => onSession(updated));
+          return finished;
+        }
+        if (current.phase === "active" || current.phase === "countdown") {
+          const reflecting = requestStop({ ...current, recording: false });
+          trainRef.current = reflecting;
+          return reflecting;
+        }
+        return current;
+      });
       void logEvent("measurement_finalized", {
         correlationId: savedSession.manifest.id,
         fields: {
@@ -1413,10 +1725,37 @@ function Measure({
     } else {
       await finalize();
     }
-  }, [calibration, onSession, videoRef]);
+  }, [calibration, onClipsProposed, onSession, videoRef]);
   useEffect(() => {
     stopRef.current = stop;
   }, [stop]);
+
+  // Countdown → active train loop (does not block measurement on transcription).
+  const trainPhase = train?.phase;
+  useEffect(() => {
+    if (!trainPhase || (trainPhase !== "countdown" && trainPhase !== "active")) return;
+    const timer = window.setInterval(() => {
+      setTrain((current) => {
+        if (!current) return current;
+        if (current.phase === "countdown") {
+          const next = tickCountdown(current);
+          if (next.phase === "active") {
+            activeStartMs.current = performance.now();
+            beginMediaRef.current();
+          }
+          trainRef.current = next;
+          return next;
+        }
+        if (current.phase === "active") {
+          const next = tickActive(current, 1);
+          trainRef.current = next;
+          return next;
+        }
+        return current;
+      });
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [trainPhase]);
 
   useEffect(() => {
     return () => {
@@ -1479,6 +1818,7 @@ function Measure({
         predictions: [...predictions.current],
         events: [...events.current],
         corrections: [],
+        cues: [...cues.current],
       }).catch((cause) => {
         void logEvent("session_checkpoint_failed", {
           correlationId: manifest.current?.id,
@@ -1513,25 +1853,280 @@ function Measure({
       </section>
     );
   }
+
+  const elapsedActiveSec = train?.elapsedActiveSec ?? 0;
+  const promptDrill = train?.config.drill ?? selectedDrill;
+
   return (
-    <section className="measure-screen">
-      <VideoPreview stream={cameraStream} videoRef={videoRef} state={testing ? prediction?.state ?? "unknown" : undefined} />
+    <section className="measure-screen train-screen">
+      <VideoPreview
+        stream={cameraStream}
+        videoRef={videoRef}
+        state={testing ? prediction?.state ?? "unknown" : undefined}
+        lensAnchor={profile.lensAnchor}
+        cuePulse={lastCueKind === "pulse" || lastCueKind === "halo"}
+        promptOverlay={
+          testing && promptDrill && train && (train.phase === "active" || train.phase === "countdown") ? (
+            <LensAdjacentPromptOverlay
+              drill={promptDrill}
+              anchor={profile.lensAnchor}
+              elapsedSec={train.phase === "countdown" ? 0 : elapsedActiveSec}
+              speaking={speaking}
+              largeText={largeText}
+              hiddenOverride={train.phase === "countdown"}
+            />
+          ) : undefined
+        }
+      />
       <div className="measure-copy">
-        <p className="eyebrow">{profile.name}</p>
-        <h1>{testing ? "Speak naturally." : "Ready for a measurement test."}</h1>
-        <p>{testing ? "The lens halo changes only after a stable signal. No score is shown while you speak." : "Practice without recording, or make a reviewable test recording."}</p>
-        {!testing && !microphoneStream && (
-          <p className="tracking-warning">
-            Microphone is not active. A recorded test will contain video only.
-          </p>
+        <p className="eyebrow">{profile.name} · Train</p>
+        <h1>
+          {train?.phase === "reflect"
+            ? "Session complete."
+            : testing
+              ? "Speak naturally."
+              : "Choose a drill and train."}
+        </h1>
+        <p>
+          {testing
+            ? "Lens-adjacent prompts stay near the camera. Cues stay restrained. No dense scores while you speak."
+            : "Select a curriculum drill, feedback intensity, and optional goal. Recording never starts on its own after restart."}
+        </p>
+        <RecordingPrivacyBadge
+          label={
+            liveAssist
+              ? recording
+                ? "LIVE ASSIST — RECORDING"
+                : "LIVE ASSIST — NOT RECORDING"
+              : recording
+                ? "RECORDING"
+                : "NOT RECORDING"
+          }
+        />
+        {!testing && train?.phase !== "reflect" && (
+          <>
+            <DrillSetupForm
+              drills={drills}
+              selectedId={selectedDrill?.id ?? ""}
+              onSelectId={(id) => {
+                setSelectedDrillId(id);
+                const next = drills.find((drill) => drill.id === id);
+                if (next) {
+                  setIntensity(next.contactPolicy.feedbackLevel);
+                  if (next.recordingDefault === "off" || next.liveAssist) {
+                    setWantRecord(false);
+                    setLiveAssist(next.liveAssist);
+                  }
+                }
+              }}
+              intensity={intensity}
+              onIntensity={setIntensity}
+              sessionGoal={sessionGoal}
+              onSessionGoal={setSessionGoal}
+              comfortBefore={comfortBefore}
+              onComfortBefore={setComfortBefore}
+              record={wantRecord}
+              onRecord={setWantRecord}
+              largeText={largeText}
+              onLargeText={setLargeText}
+              liveAssist={liveAssist}
+              onLiveAssist={setLiveAssist}
+            />
+            <div className="train-setup">
+              <label>
+                Dataset intent
+                <select
+                  value={datasetIntent}
+                  onChange={(event) =>
+                    setDatasetIntent(event.target.value as DatasetIntent)
+                  }
+                >
+                  <option value="none">none (coaching only)</option>
+                  <option value="coaching_only">coaching_only</option>
+                  <option value="dataset_candidate">dataset_candidate</option>
+                </select>
+              </label>
+              {datasetIntent !== "none" && (
+                <>
+                  <label>
+                    Outfit label
+                    <input
+                      value={outfitLabel}
+                      onChange={(event) => setOutfitLabel(event.target.value)}
+                      placeholder="e.g. navy shirt"
+                    />
+                  </label>
+                  <label>
+                    Background label
+                    <input
+                      value={backgroundLabel}
+                      onChange={(event) => setBackgroundLabel(event.target.value)}
+                      placeholder="e.g. bookshelf"
+                    />
+                  </label>
+                </>
+              )}
+            </div>
+            {preflightMessage && (
+              <p className="tracking-warning">{preflightMessage}</p>
+            )}
+            {!microphoneStream && wantRecord && (
+              <p className="tracking-warning">
+                Microphone is not active. A recorded test will contain video only.
+              </p>
+            )}
+            <div className="button-row">
+              <button
+                type="button"
+                onClick={() => {
+                  if (datasetIntent !== "none") {
+                    const recordingConsent = consents.find(
+                      (entry) =>
+                        !entry.revokedAt && entry.scopes.includes("recording"),
+                    );
+                    const datasetConsent = consents.find(
+                      (entry) =>
+                        !entry.revokedAt &&
+                        entry.scopes.includes("dataset_include"),
+                    );
+                    const preflight = evaluatePreflight({
+                      intent: datasetIntent,
+                      consents,
+                      recordingConsentId: recordingConsent?.id,
+                      datasetConsentId: datasetConsent?.id,
+                      faceDetectedRatio: 0.98,
+                      faceScale: 0.28,
+                      brightnessOk: true,
+                      audioPeakDbfs: -12,
+                      roomNoiseDbfs: -50,
+                      diskFreeBytes: 50_000_000_000,
+                      estimatedSessionBytes: 2_000_000_000,
+                      outfitLabel: outfitLabel || undefined,
+                      backgroundLabel: backgroundLabel || undefined,
+                    });
+                    if (!preflight.ready) {
+                      setPreflightMessage(
+                        `Preflight blocked: ${preflight.blockers.join(", ")}`,
+                      );
+                      return;
+                    }
+                    if (preflight.warnings.length) {
+                      setPreflightMessage(
+                        `Preflight warnings: ${preflight.warnings.join(", ")}`,
+                      );
+                    } else {
+                      setPreflightMessage(undefined);
+                    }
+                  } else {
+                    setPreflightMessage(undefined);
+                  }
+                  start(wantRecord && !liveAssist);
+                }}
+              >
+                Start drill
+              </button>
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => {
+                  setManualSpeaking((value) => !value);
+                }}
+                title="Manual speaking override for hide-on-speech when no mic is active"
+              >
+                Speaking: {speaking ? "yes" : "no"}
+                {vad.speaking ? " (VAD)" : manualSpeaking ? " (manual)" : ""}
+              </button>
+            </div>
+          </>
         )}
-        {!testing ? (
-          <div className="button-row">
-            <button onClick={() => start(false)}>Start practice</button>
-            <button className="secondary" onClick={() => start(true)}>Record test</button>
+        {train && (train.phase === "countdown" || train.phase === "active") && (
+          <TrainActiveChrome
+            train={{ ...train, recording }}
+            onEmergencyStop={() => {
+              const stopped = emergencyStop(trainRef.current ?? train);
+              setTrain(stopped);
+              trainRef.current = stopped;
+              void stop("incomplete", "Emergency stop");
+            }}
+            onStop={() => {
+              void stop("complete");
+            }}
+          />
+        )}
+        {train?.phase === "reflect" && (
+          <ReflectionForm
+            reflectionPrompts={train.config.drill.reflection}
+            onFinish={(notes, comfortAfter) => {
+              const finished = finishReflection(
+                trainRef.current ?? train,
+                notes,
+                comfortAfter,
+                speakingSecRef.current,
+              );
+              setTrain(finished);
+              trainRef.current = finished;
+              const prior = lastSavedSessionRef.current;
+              if (prior) {
+                const updated = applyReflectionToSession(prior, finished);
+                lastSavedSessionRef.current = updated;
+                void store.sessions.put(updated).then(() => onSession(updated));
+              }
+            }}
+          />
+        )}
+        {sessionCues.length > 0 && (train?.phase === "reflect" || train?.phase === "complete") && (
+          <div className="panel cue-rating-panel">
+            <h2>Rate cues</h2>
+            <p className="muted">Mark each cue helpful, unnecessary, or wrong.</p>
+            {sessionCues.map((cue) => (
+              <div key={cue.id} className="cue-rating-row">
+                <span>
+                  {cue.kind} @ {(cue.timestampUs / 1_000_000).toFixed(1)}s
+                  {cue.rating ? ` · ${cue.rating}` : ""}
+                </span>
+                <div className="button-row">
+                  {(["helpful", "unnecessary", "wrong"] as const).map((rating) => (
+                    <button
+                      key={rating}
+                      type="button"
+                      className="secondary"
+                      onClick={() => {
+                        policyRef.current?.rateCue(cue.id, rating);
+                        cues.current = cues.current.map((entry) =>
+                          entry.id === cue.id ? { ...entry, rating } : entry,
+                        );
+                        setSessionCues([...cues.current]);
+                        const prior = lastSavedSessionRef.current;
+                        if (prior) {
+                          const updated = rateSessionCue(prior, cue.id, rating);
+                          lastSavedSessionRef.current = updated;
+                          void store.sessions.put(updated).then(() => onSession(updated));
+                        }
+                      }}
+                    >
+                      {rating}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
           </div>
-        ) : (
-          <button className="stop" onClick={() => void stop()}>{recording ? "Stop and save" : "Stop practice"}</button>
+        )}
+        {train?.phase === "complete" && (
+          <p className="muted">
+            {train.completed ? "Drill completion criteria met." : "Session saved without completion credit."}
+            {" "}
+            <button
+              type="button"
+              className="text-button"
+              onClick={() => {
+                setTrain(undefined);
+                trainRef.current = undefined;
+              }}
+            >
+              Train again
+            </button>
+          </p>
         )}
         {captureFailure && <p className="tracking-warning">{captureFailure}</p>}
         {liveTracker.error && <p className="tracking-warning">Tracker unavailable: {liveTracker.error}</p>}
@@ -1552,6 +2147,8 @@ function Measure({
             <div><dt>Calibration</dt><dd>{calibration.id.slice(0, 8)}</dd></div>
             <div><dt>Tracker</dt><dd>{calibration.trackerId}</dd></div>
             <div><dt>Model</dt><dd>{calibration.trackerVersion}</dd></div>
+            <div><dt>Drill</dt><dd>{selectedDrill?.id ?? "—"}</dd></div>
+            <div><dt>Cues</dt><dd>{cueCount}</dd></div>
           </dl>
         )}
       </div>
@@ -1640,6 +2237,25 @@ function Review({
         )
       : [],
     [reviewOriginUs, selected, timelineDurationUs],
+  );
+  const reviewDrillId = selected?.manifest.coaching?.drillId;
+  const reviewDrill = useMemo(
+    () => (reviewDrillId ? getDrillById(reviewDrillId) : undefined),
+    [reviewDrillId],
+  );
+  const multiLanes = useMemo(
+    () =>
+      selected
+        ? buildReviewLanes({
+            originUs: reviewOriginUs,
+            durationUs: timelineDurationUs || 1,
+            predictions: selected.predictions,
+            events: selected.events,
+            cues: selected.cues,
+            drill: reviewDrill,
+          })
+        : [],
+    [reviewDrill, reviewOriginUs, selected, timelineDurationUs],
   );
   const mediaUrl = useMemo(() => selected?.media ? URL.createObjectURL(selected.media) : undefined, [selected]);
   useEffect(() => () => { if (mediaUrl) URL.revokeObjectURL(mediaUrl); }, [mediaUrl]);
@@ -1793,7 +2409,37 @@ function Review({
       predictions: selected.predictions,
       events: selected.events,
       corrections: selected.corrections,
+      cues: selected.cues ?? [],
     });
+  };
+
+  const exportSessionReport = () => {
+    if (!selected) return;
+    const report = buildSessionReport({
+      manifest: selected.manifest,
+      predictions: selected.predictions,
+      events: selected.events,
+      cues: selected.cues,
+      drill: reviewDrill,
+      originUs: reviewOriginUs,
+      durationUs: timelineDurationUs || 1,
+    });
+    downloadJson(`report-${selected.manifest.id}.json`, report);
+    const markdownUrl = URL.createObjectURL(
+      new Blob([report.markdown], { type: "text/markdown" }),
+    );
+    const link = document.createElement("a");
+    link.href = markdownUrl;
+    link.download = `report-${selected.manifest.id}.md`;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(markdownUrl), 1_000);
+  };
+
+  const seekToTimelineUs = (timestampUs: number) => {
+    if (!playbackRef.current) return;
+    playbackRef.current.currentTime = seekSecondsFromTimelineUs(timestampUs);
   };
 
   return (
@@ -1838,6 +2484,94 @@ function Review({
               </div>
             )}
             <label className="blind-toggle"><input type="checkbox" checked={blind} onChange={(event) => setBlind(event.target.checked)} /> Blind labeling</label>
+            {selected.manifest.coaching && (
+              <p className="muted">
+                Drill {selected.manifest.coaching.drillId} v{selected.manifest.coaching.drillVersion}
+                {" · "}
+                {selected.manifest.coaching.feedbackIntensity}
+                {selected.manifest.coaching.sessionGoal
+                  ? ` · Goal: ${selected.manifest.coaching.sessionGoal}`
+                  : ""}
+              </p>
+            )}
+            <div className="review-lanes" aria-label="Multi-lane coaching timeline">
+              {multiLanes.map((lane) => (
+                <div className="review-lane" key={lane.id}>
+                  <span>{lane.name}</span>
+                  <div className="review-lane-track">
+                    {lane.segments.map((segment, index) => {
+                      const widthPct =
+                        ((segment.endUs - segment.startUs) / Math.max(timelineDurationUs, 1)) * 100;
+                      const leftPct = (segment.startUs / Math.max(timelineDurationUs, 1)) * 100;
+                      return (
+                        <button
+                          type="button"
+                          key={`${lane.id}-seg-${index}`}
+                          className="review-lane-seg"
+                          title={segment.label}
+                          style={{
+                            left: `${leftPct}%`,
+                            width: `${Math.max(widthPct, 0.2)}%`,
+                            background:
+                              lane.id === "contact"
+                                ? contactColor(segment.label)
+                                : lane.id === "notes"
+                                  ? "#5b7cfa88"
+                                  : "#7ee2b855",
+                          }}
+                          onClick={() => seekToTimelineUs(segment.startUs)}
+                        />
+                      );
+                    })}
+                    {lane.markers.map((marker) => (
+                      <button
+                        type="button"
+                        key={`${lane.id}-m-${marker.id ?? marker.timestampUs}`}
+                        className="review-lane-marker"
+                        title={`${marker.label} @ ${(marker.timestampUs / 1_000_000).toFixed(2)}s`}
+                        style={{
+                          left: `${(marker.timestampUs / Math.max(timelineDurationUs, 1)) * 100}%`,
+                          background: marker.kind === "cue" ? "#e8c86b" : undefined,
+                        }}
+                        onClick={() => seekToTimelineUs(marker.timestampUs)}
+                      />
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+            {(selected.cues?.length ?? 0) > 0 && (
+              <div className="panel cue-rating-panel">
+                <h2>Cue ratings</h2>
+                {selected.cues!.map((cue) => (
+                  <div key={cue.id} className="cue-rating-row">
+                    <button
+                      type="button"
+                      className="text-button"
+                      onClick={() => seekToTimelineUs(Math.max(0, cue.timestampUs - reviewOriginUs))}
+                    >
+                      {cue.kind} · evidence: {cue.evidence.join(", ")}
+                      {cue.rating ? ` · ${cue.rating}` : ""}
+                    </button>
+                    <div className="button-row">
+                      {(["helpful", "unnecessary", "wrong"] as const).map((rating) => (
+                        <button
+                          key={rating}
+                          type="button"
+                          className="secondary"
+                          onClick={() => {
+                            const updated = rateSessionCue(selected, cue.id, rating);
+                            void store.sessions.put(updated).then(() => onUpdated(updated));
+                          }}
+                        >
+                          {rating}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
             <button
               className={`timeline ${blind ? "blind" : ""}`}
               aria-label="Prediction timeline; click to seek playback"
@@ -1893,6 +2627,7 @@ function Review({
                   <button className="secondary" onClick={exportLabels}>Export labels + metrics</button>
                 </div>
                 <button className="text-button" onClick={exportAnalysis}>Export complete analysis for reprocessing</button>
+                <button className="text-button" onClick={exportSessionReport}>Export session report (JSON + Markdown)</button>
                 <div className="comparison-panel">
                   <label>Compare reprocessed output
                     <input type="file" accept="application/json,.json" onChange={(event) => void loadComparison(event.target.files?.[0])} />
@@ -1944,6 +2679,19 @@ export default function App() {
   const [featureFlags, setFeatureFlags] = useState<FeatureFlags>({
     ...DEFAULT_FEATURE_FLAGS,
   });
+  const [liveAssistHudVisible, setLiveAssistHudVisible] = useState(true);
+  const [liveAssistEnabled, setLiveAssistEnabled] = useState(false);
+  const [liveAssistSnapshot, setLiveAssistSnapshot] = useState<{
+    state?: GazeState;
+    recording: boolean;
+    liveAssist: boolean;
+  }>({ recording: false, liveAssist: false });
+  const [consents, setConsents] = useState<ConsentRecord[]>([]);
+  const [datasetClips, setDatasetClips] = useState<ClipCandidate[]>([]);
+  const [datasetAssets] = useState<RecordingAsset[]>([]);
+  const [pendingDrillId, setPendingDrillId] = useState<string>();
+  const [pendingFollowedRecommendationId, setPendingFollowedRecommendationId] =
+    useState<string>();
   const videoRef = useRef<HTMLVideoElement>(null);
   const activeProfile = profiles.find((profile) => profile.id === activeId);
   const activeCalibration = selectActiveCalibration(
@@ -2008,7 +2756,14 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    void Promise.all([refresh(), store.sessions.all()]).then(async ([, storedSessions]) => {
+    void Promise.all([
+      refresh(),
+      store.sessions.all(),
+      store.consents.all(),
+      store.clips.all(),
+    ]).then(async ([, storedSessions, storedConsents, storedClips]) => {
+      setConsents(storedConsents);
+      setDatasetClips(storedClips);
       const recovered = await Promise.all(storedSessions.map(async (session) => {
         const recovered = recoverInterruptedSession(session);
         if (recovered.changed) {
@@ -2305,9 +3060,20 @@ export default function App() {
       <header className="app-header">
         <a className="brand" href="#" onClick={() => setPage("setup")}><span>●</span> Presence</a>
         <nav aria-label="Primary">
-          {(["setup", "calibrate", "measure", "review"] as Page[]).map((item) => (
+          {(
+            [
+              "setup",
+              "calibrate",
+              "measure",
+              "review",
+              "progress",
+              "consent",
+              "curate",
+              "dataset",
+            ] as Page[]
+          ).map((item) => (
             <button className={page === item ? "active" : ""} key={item} onClick={() => setPage(item)}>
-              {item === "measure" ? "Test" : item[0].toUpperCase() + item.slice(1)}
+              {item === "measure" ? "Train" : item[0].toUpperCase() + item.slice(1)}
             </button>
           ))}
         </nav>
@@ -2365,6 +3131,22 @@ export default function App() {
           onSession={upsertSession}
           debug={debug}
           calibrationIssue={calibrationIssue}
+          onLiveAssistSnapshot={setLiveAssistSnapshot}
+          consents={consents}
+          initialDrillId={pendingDrillId}
+          followedRecommendationId={pendingFollowedRecommendationId}
+          onClipsProposed={(proposals) => {
+            void store.clips.all().then((existing) => {
+              const merged = [
+                ...proposals,
+                ...existing.filter(
+                  (clip) =>
+                    !proposals.some((proposal) => proposal.id === clip.id),
+                ),
+              ];
+              void store.clips.putAll(merged).then(() => setDatasetClips(merged));
+            });
+          }}
         />
       )}
       {page === "review" && (
@@ -2372,6 +3154,42 @@ export default function App() {
           sessions={sessions}
           onUpdated={upsertSession}
           featureFlags={featureFlags}
+        />
+      )}
+      {page === "progress" && (
+        <ProgressPanel
+          sessions={sessions}
+          onFollowDrill={(drillId, recommendationId) => {
+            setPendingDrillId(drillId);
+            setPendingFollowedRecommendationId(recommendationId);
+            setPage("measure");
+          }}
+        />
+      )}
+      {page === "consent" && (
+        <ConsentPanel consents={consents} onChange={setConsents} />
+      )}
+      {page === "curate" && (
+        <CuratePanel
+          sessions={sessions}
+          clips={datasetClips}
+          onClipsChange={setDatasetClips}
+        />
+      )}
+      {page === "dataset" && (
+        <DatasetPanel
+          sessions={sessions}
+          consents={consents}
+          clips={datasetClips}
+          assets={datasetAssets}
+        />
+      )}
+      {(liveAssistEnabled || liveAssistSnapshot.liveAssist) && (
+        <LiveAssistHud
+          visible={liveAssistHudVisible}
+          onToggleVisible={() => setLiveAssistHudVisible((value) => !value)}
+          recording={liveAssistSnapshot.recording}
+          state={liveAssistSnapshot.state ?? "unknown"}
         />
       )}
       <button
@@ -2390,6 +3208,18 @@ export default function App() {
         }}
       >
         Diagnostics {debug ? "on" : "off"}
+      </button>
+      <button
+        type="button"
+        className={`debug-toggle ${liveAssistEnabled ? "enabled" : ""}`}
+        aria-pressed={liveAssistEnabled}
+        data-live-assist-toggle="true"
+        onClick={() => {
+          setLiveAssistEnabled((value) => !value);
+          setLiveAssistHudVisible(true);
+        }}
+      >
+        Live assist {liveAssistEnabled ? "on" : "off"}
       </button>
     </main>
   );

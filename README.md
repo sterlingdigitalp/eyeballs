@@ -1,8 +1,13 @@
 # Camera Presence Coach
 
-Local-first macOS camera-contact measurement application. This repository currently implements the
-Phase 1 measurement kernel described in
-`CAMERA_PRESENCE_PRESENTER_TWIN_BUILD_PLAN.md`.
+Local-first macOS camera-contact coaching application. Status (see
+`CAMERA_PRESENCE_PRESENTER_TWIN_BUILD_PLAN.md`):
+
+- **Phase 1:** measurement kernel largely implemented; human/hardware acceptance still open
+- **Phase 2:** integrated coaching **prototype** (drills, cues, train/review/progress) — not an accepted MVP
+- **Phase 3:** dataset **domain scaffolding and UI prototype** only — not a production CaptureCore/worker/export engine
+
+Generation remains Phase 4+.
 
 ## Development
 

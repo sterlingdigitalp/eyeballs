@@ -6,3 +6,5 @@ apps/desktop/public/mediapipe/
 apps/desktop/public/models/*.task
 *.log
 .DS_Store
+.handoff-auto.md
+.handoff*.md

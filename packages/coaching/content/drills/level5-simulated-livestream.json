@@ -1,0 +1,42 @@
+{
+  "id": "simulated-livestream-01",
+  "version": 1,
+  "name": "Respond to a simulated comment",
+  "mode": "simulated_livestream",
+  "curriculumLevel": 5,
+  "durationTargetSec": 60,
+  "prompt": {
+    "type": "comment",
+    "text": "Viewer asks: Can you give a shorter example?",
+    "revealMode": "one_line",
+    "revealSec": 3,
+    "hideWhenSpeaking": true
+  },
+  "contactPolicy": {
+    "microGlanceToleranceMs": 450,
+    "reportableBreakMinMs": 800,
+    "longBreakMinMs": 1800,
+    "contactRecoveryConfirmMs": 250,
+    "feedbackCooldownMs": 2500,
+    "feedbackLevel": "active"
+  },
+  "scoring": {
+    "excludeFirstSec": 1,
+    "excludeLastSec": 0,
+    "sentenceBoundaryContact": true,
+    "speakingWindowsOnly": true
+  },
+  "noteAllowedIntervals": [
+    { "startSec": 8, "endSec": 12, "label": "Read comment" }
+  ],
+  "completion": {
+    "minimumSpeakingSec": 25,
+    "minimumDurationSec": 40
+  },
+  "reflection": [
+    "Did you acknowledge the comment then return?",
+    "How long did the recovery take?"
+  ],
+  "liveAssist": false,
+  "recordingDefault": "optional"
+}

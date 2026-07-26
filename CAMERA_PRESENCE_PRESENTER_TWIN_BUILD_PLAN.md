@@ -2,8 +2,8 @@
 title: "Camera Presence Coach & Presenter Twin — Complete Build Plan"
 version: "1.1"
 date: "2026-07-25"
-last_progress_update: "2026-07-25"
-status: "Phase 1 implementation complete; Phase 1 acceptance in progress"
+last_progress_update: "2026-07-26"
+status: "Phase 1 engineering largely complete (hardware acceptance open); Phase 2 integrated coaching prototype; Phase 3 domain scaffolding/UI prototype only — not an operational dataset engine. CaptureCore: provisional Swift sidecar charter in docs/CAPTURE_CORE_CHARTER.md + ADR-004 (not implemented)"
 platform_priority: "macOS first, local-first"
 working_product_name: "Camera Presence Coach"
 ---

@@ -1,0 +1,40 @@
+{
+  "id": "prompted-response-01",
+  "version": 1,
+  "name": "Thirty-second direct answer",
+  "mode": "prompted_response",
+  "curriculumLevel": 3,
+  "durationTargetSec": 45,
+  "prompt": {
+    "type": "question",
+    "text": "Explain one idea you care about in plain language.",
+    "revealMode": "hide_on_speech",
+    "revealSec": 5,
+    "hideWhenSpeaking": true
+  },
+  "contactPolicy": {
+    "microGlanceToleranceMs": 500,
+    "reportableBreakMinMs": 900,
+    "longBreakMinMs": 2000,
+    "contactRecoveryConfirmMs": 250,
+    "feedbackCooldownMs": 3000,
+    "feedbackLevel": "standard"
+  },
+  "scoring": {
+    "excludeFirstSec": 2,
+    "excludeLastSec": 0,
+    "sentenceBoundaryContact": true,
+    "speakingWindowsOnly": true
+  },
+  "noteAllowedIntervals": [],
+  "completion": {
+    "minimumSpeakingSec": 20,
+    "minimumDurationSec": 30
+  },
+  "reflection": [
+    "Where did you feel tempted to look?",
+    "Did returning to the lens interrupt your thought?"
+  ],
+  "liveAssist": false,
+  "recordingDefault": "optional"
+}

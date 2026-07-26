@@ -1,0 +1,38 @@
+{
+  "id": "relaxed-lens-hold-01",
+  "version": 1,
+  "name": "Relaxed lens hold",
+  "mode": "lens_comfort",
+  "curriculumLevel": 1,
+  "durationTargetSec": 30,
+  "prompt": {
+    "type": "text",
+    "text": "Look softly at the lens. Blink and breathe.",
+    "revealMode": "one_line",
+    "hideWhenSpeaking": false
+  },
+  "contactPolicy": {
+    "microGlanceToleranceMs": 600,
+    "reportableBreakMinMs": 1200,
+    "longBreakMinMs": 2500,
+    "contactRecoveryConfirmMs": 250,
+    "feedbackCooldownMs": 4000,
+    "feedbackLevel": "minimal"
+  },
+  "scoring": {
+    "excludeFirstSec": 2,
+    "excludeLastSec": 0,
+    "sentenceBoundaryContact": false,
+    "speakingWindowsOnly": false
+  },
+  "noteAllowedIntervals": [],
+  "completion": {
+    "minimumDurationSec": 20
+  },
+  "reflection": [
+    "Did looking at the lens feel natural?",
+    "Where did your eyes want to go?"
+  ],
+  "liveAssist": false,
+  "recordingDefault": "optional"
+}

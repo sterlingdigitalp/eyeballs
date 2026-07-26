@@ -6,10 +6,10 @@ Use one `MediaStream` camera owner inside the Tauri webview for Phase 1 preview,
 the analysis frame source. A separate microphone stream is added only for an explicitly recorded
 test. This is the lowest-copy path for MediaPipe because frames remain in the webview.
 
-Production dataset capture is not decided by this ADR. Before Phase 3, compare a Swift
-AVFoundation helper and a Rust bridge using 4K stability, timestamp access, A/V drift, recovery,
-signing, and clean-preview criteria. A webview recorder must not graduate to dataset-master capture
-without meeting those gates.
+Production dataset capture is **not** decided by this ADR. Provisional production direction is
+documented in [ADR-004](ADR-004-capture-core-provisional.md) (Swift CaptureCore sidecar) and the
+implementation charter [CAPTURE_CORE_CHARTER.md](../CAPTURE_CORE_CHARTER.md). A webview recorder
+must not graduate to dataset-master capture without those Stage 0 proofs and gates.
 
 Fallback behavior: if the selected device is removed or tracking fails, transition measurement to
 `unknown`, stop recording safely, and mark an unfinalized session incomplete.

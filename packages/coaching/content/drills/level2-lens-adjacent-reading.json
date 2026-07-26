@@ -1,0 +1,46 @@
+{
+  "id": "lens-adjacent-reading-01",
+  "version": 1,
+  "name": "One-line lens reading",
+  "mode": "lens_adjacent_reading",
+  "curriculumLevel": 2,
+  "durationTargetSec": 45,
+  "prompt": {
+    "type": "text",
+    "text": "Read this line, then speak it while staying near the lens.",
+    "phrases": [
+      "Camera contact starts at the lens.",
+      "Keep the words close to the glass.",
+      "Return after every glance down."
+    ],
+    "revealMode": "phrase_by_phrase",
+    "revealSec": 4,
+    "hideWhenSpeaking": true
+  },
+  "contactPolicy": {
+    "microGlanceToleranceMs": 700,
+    "reportableBreakMinMs": 1000,
+    "longBreakMinMs": 2200,
+    "contactRecoveryConfirmMs": 250,
+    "feedbackCooldownMs": 3500,
+    "feedbackLevel": "standard",
+    "noteAllowedNearLensMs": 900
+  },
+  "scoring": {
+    "excludeFirstSec": 2,
+    "excludeLastSec": 0,
+    "sentenceBoundaryContact": false,
+    "speakingWindowsOnly": true
+  },
+  "noteAllowedIntervals": [],
+  "completion": {
+    "minimumSpeakingSec": 15,
+    "minimumDurationSec": 30
+  },
+  "reflection": [
+    "Did the text stay near the lens?",
+    "Did reading pull your eyes down the screen?"
+  ],
+  "liveAssist": false,
+  "recordingDefault": "optional"
+}

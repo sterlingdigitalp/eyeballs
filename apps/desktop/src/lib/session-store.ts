@@ -2,10 +2,12 @@ import type { StoredSession } from "./store";
 import {
   calibrationSchema,
   correctionSchema,
+  cueEventSchema,
   featureVectorSchema,
   gazeEventSchema,
   gazePredictionSchema,
   sessionManifestSchema,
+  speakingWindowSchema,
 } from "../../../../packages/contracts/src";
 import { z } from "zod";
 
@@ -16,6 +18,8 @@ const storedSessionSchema = z.object({
   predictions: z.array(gazePredictionSchema),
   events: z.array(gazeEventSchema),
   corrections: z.array(correctionSchema),
+  cues: z.array(cueEventSchema).optional(),
+  speakingWindows: z.array(speakingWindowSchema).optional(),
   media: z.instanceof(Blob).optional(),
 });
 

@@ -1,0 +1,38 @@
+{
+  "id": "live-assist-01",
+  "version": 1,
+  "name": "Live assist practice",
+  "mode": "live_assist",
+  "curriculumLevel": 6,
+  "durationTargetSec": 120,
+  "prompt": {
+    "type": "none",
+    "text": "",
+    "revealMode": "one_line",
+    "hideWhenSpeaking": false
+  },
+  "contactPolicy": {
+    "microGlanceToleranceMs": 500,
+    "reportableBreakMinMs": 1200,
+    "longBreakMinMs": 2500,
+    "contactRecoveryConfirmMs": 300,
+    "feedbackCooldownMs": 5000,
+    "feedbackLevel": "minimal"
+  },
+  "scoring": {
+    "excludeFirstSec": 0,
+    "excludeLastSec": 0,
+    "sentenceBoundaryContact": false,
+    "speakingWindowsOnly": true
+  },
+  "noteAllowedIntervals": [],
+  "completion": {
+    "minimumDurationSec": 30
+  },
+  "reflection": [
+    "Was the private HUD visible only to you?",
+    "Did cues stay quiet enough for live work?"
+  ],
+  "liveAssist": true,
+  "recordingDefault": "off"
+}

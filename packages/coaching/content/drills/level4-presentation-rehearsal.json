@@ -1,0 +1,48 @@
+{
+  "id": "presentation-rehearsal-01",
+  "version": 1,
+  "name": "One-minute prepared section",
+  "mode": "presentation_rehearsal",
+  "curriculumLevel": 4,
+  "durationTargetSec": 75,
+  "prompt": {
+    "type": "outline",
+    "text": "Deliver your opening: claim, reason, example.",
+    "phrases": [
+      "State the claim.",
+      "Give one reason.",
+      "Share a concrete example."
+    ],
+    "revealMode": "one_line",
+    "hideWhenSpeaking": false
+  },
+  "contactPolicy": {
+    "microGlanceToleranceMs": 500,
+    "reportableBreakMinMs": 1000,
+    "longBreakMinMs": 2200,
+    "contactRecoveryConfirmMs": 250,
+    "feedbackCooldownMs": 3000,
+    "feedbackLevel": "standard",
+    "noteAllowedNearLensMs": 1500
+  },
+  "scoring": {
+    "excludeFirstSec": 2,
+    "excludeLastSec": 1,
+    "sentenceBoundaryContact": true,
+    "speakingWindowsOnly": true
+  },
+  "noteAllowedIntervals": [
+    { "startSec": 15, "endSec": 20, "label": "Check outline" },
+    { "startSec": 40, "endSec": 45, "label": "Check outline" }
+  ],
+  "completion": {
+    "minimumSpeakingSec": 40,
+    "minimumDurationSec": 55
+  },
+  "reflection": [
+    "How quickly did you return after notes?",
+    "Were sentence endings still on the lens?"
+  ],
+  "liveAssist": false,
+  "recordingDefault": "optional"
+}
