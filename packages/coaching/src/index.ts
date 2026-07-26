@@ -7,3 +7,4 @@ export * from "./review-timeline";
 export * from "./progress";
 export * from "./recommendations";
 export * from "./session-coaching";
+export * from "./audio-guidance";

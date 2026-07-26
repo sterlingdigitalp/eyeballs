@@ -62,12 +62,14 @@ import {
   FeedbackPolicyEngine,
   finishReflection,
   getDrillById,
+  HANDS_FREE_SETTLE_SECONDS,
   loadBuiltinDrills,
   noteWindowsFromDrill,
   rateSessionCue,
   requestStop,
   restartSafeRecordingFlag,
   seekSecondsFromTimelineUs,
+  shouldAutoCompleteHandsFreeDrill,
   speakingSeconds,
   tickActive,
   tickCountdown,
@@ -87,6 +89,15 @@ import {
 } from "./coaching/TrainPanel";
 import { useBuiltinDrills } from "./coaching/useBuiltinDrills";
 import { useSpeakingVad } from "./coaching/useSpeakingVad";
+import {
+  readCurrentDisplayPlacement,
+  useCurrentDisplayPlacement,
+} from "./coaching/useCurrentDisplayPlacement";
+import {
+  cancelCoachingAudio,
+  playCoachingTone,
+  prepareHandsFreeDrill,
+} from "./coaching/coaching-audio";
 import { ProgressPanel } from "./coaching/ProgressPanel";
 import { LiveAssistHud } from "./coaching/LiveAssistHud";
 import { ConsentPanel } from "./dataset/ConsentPanel";
@@ -105,6 +116,7 @@ import {
 import { store, type StoredSession } from "./lib/store";
 import { sampleVideoBrightness, type BrightnessAssessment } from "./lib/frame-quality";
 import { audioMeterPercent, rmsDbfs } from "./lib/audio-level";
+import { promptPlacementIssue as getPromptPlacementIssue } from "./lib/display-placement";
 import {
   DEFAULT_FEATURE_FLAGS,
   parseFeatureFlags,
@@ -1143,6 +1155,7 @@ function Measure({
   onClipsProposed,
   followedRecommendationId,
   initialDrillId,
+  promptPlacementIssue,
 }: {
   profile?: CaptureProfile;
   calibration?: Calibration;
@@ -1161,6 +1174,7 @@ function Measure({
   onClipsProposed?: (clips: ClipCandidate[]) => void;
   followedRecommendationId?: string;
   initialDrillId?: string;
+  promptPlacementIssue?: string;
 }) {
   const model = useMemo(() => calibration ? trainClassifier(calibration) : undefined, [calibration]);
   const pipeline = useRef<MeasurementPipeline | undefined>(undefined);
@@ -1202,6 +1216,8 @@ function Measure({
   const [wantRecord, setWantRecord] = useState(false);
   const [largeText, setLargeText] = useState(false);
   const [liveAssist, setLiveAssist] = useState(false);
+  const [handsFreeAudio, setHandsFreeAudio] = useState(true);
+  const [preparingAudio, setPreparingAudio] = useState(false);
   const [datasetIntent, setDatasetIntent] = useState<DatasetIntent>("none");
   const [outfitLabel, setOutfitLabel] = useState("");
   const [backgroundLabel, setBackgroundLabel] = useState("");
@@ -1220,6 +1236,8 @@ function Measure({
   const beginMediaRef = useRef<() => void>(() => undefined);
   const lastSavedSessionRef = useRef<StoredSession | undefined>(undefined);
   const speakingSecRef = useRef(0);
+  const speakingWindowsRef = useRef<Array<{ startUs: number; endUs: number }>>([]);
+  const handsFreeCompletionRef = useRef<string | undefined>(undefined);
   // Never resume recording after restart — always start from false.
   useEffect(() => {
     const initial = selectedDrill ?? drills[0];
@@ -1239,6 +1257,10 @@ function Measure({
 
   useEffect(() => {
     speakingSecRef.current = speakingSeconds(vad.windows);
+    speakingWindowsRef.current = vad.windows.map((window) => ({
+      startUs: window.startUs,
+      endUs: window.endUs,
+    }));
   }, [vad.windows]);
 
   useEffect(() => {
@@ -1322,6 +1344,7 @@ function Measure({
         events: [...events.current],
         corrections: [],
         cues: [...cues.current],
+        speakingWindows: [...speakingWindowsRef.current],
       }).catch((cause) => {
         void logEvent("session_checkpoint_failed", {
           correlationId: manifest.current?.id,
@@ -1346,6 +1369,8 @@ function Measure({
       comfortBefore,
       record,
       liveAssist,
+      handsFreeAudio,
+      countdownSec: handsFreeAudio ? HANDS_FREE_SETTLE_SECONDS : 3,
     });
     const counting = beginCountdown(trainState);
     setTrain(counting);
@@ -1358,6 +1383,7 @@ function Measure({
     setSessionCues([]);
     lastSavedSessionRef.current = undefined;
     speakingSecRef.current = 0;
+    speakingWindowsRef.current = [];
     pipeline.current = new MeasurementPipeline(model);
     policyRef.current = new FeedbackPolicyEngine({
       drill: activeDrill,
@@ -1365,6 +1391,7 @@ function Measure({
     });
     stopping.current = false;
     finalizedSessionId.current = undefined;
+    handsFreeCompletionRef.current = undefined;
     setTesting(true);
     setRecording(false);
     setLatencyHistory([]);
@@ -1435,6 +1462,7 @@ function Measure({
       events: [],
       corrections: [],
       cues: [],
+      speakingWindows: [],
     }).catch((cause) => {
       const message = `Initial session checkpoint failed: ${
         cause instanceof Error ? cause.message : String(cause)
@@ -1527,6 +1555,7 @@ function Measure({
       startUs: window.startUs,
       endUs: window.endUs,
     }));
+    speakingWindowsRef.current = speakingWindows;
     manifest.current = { ...activeManifest, status: "finalizing" };
     try {
       await store.sessions.put({
@@ -1741,6 +1770,9 @@ function Measure({
           const next = tickCountdown(current);
           if (next.phase === "active") {
             activeStartMs.current = performance.now();
+            if (next.config.handsFreeAudio) {
+              void playCoachingTone("start");
+            }
             beginMediaRef.current();
           }
           trainRef.current = next;
@@ -1758,7 +1790,32 @@ function Measure({
   }, [trainPhase]);
 
   useEffect(() => {
+    const activeManifest = manifest.current;
+    if (
+      !activeManifest ||
+      train?.phase !== "active" ||
+      !train.config.handsFreeAudio ||
+      !shouldAutoCompleteHandsFreeDrill(
+        train.config.drill,
+        train.elapsedActiveSec,
+      ) ||
+      handsFreeCompletionRef.current === activeManifest.id
+    ) {
+      return;
+    }
+    handsFreeCompletionRef.current = activeManifest.id;
+    void stopRef.current("complete");
+    void playCoachingTone("complete");
+  }, [
+    train?.config.drill,
+    train?.config.handsFreeAudio,
+    train?.elapsedActiveSec,
+    train?.phase,
+  ]);
+
+  useEffect(() => {
     return () => {
+      cancelCoachingAudio();
       if (manifest.current && !stopping.current) {
         void stopRef.current(
           "incomplete",
@@ -1819,6 +1876,7 @@ function Measure({
         events: [...events.current],
         corrections: [],
         cues: [...cues.current],
+        speakingWindows: [...speakingWindowsRef.current],
       }).catch((cause) => {
         void logEvent("session_checkpoint_failed", {
           correlationId: manifest.current?.id,
@@ -1892,6 +1950,11 @@ function Measure({
             ? "Lens-adjacent prompts stay near the camera. Cues stay restrained. No dense scores while you speak."
             : "Select a curriculum drill, feedback intensity, and optional goal. Recording never starts on its own after restart."}
         </p>
+        {promptPlacementIssue && (
+          <p className="tracking-warning" role="alert">
+            {promptPlacementIssue}
+          </p>
+        )}
         <RecordingPrivacyBadge
           label={
             liveAssist
@@ -1931,6 +1994,9 @@ function Measure({
               onLargeText={setLargeText}
               liveAssist={liveAssist}
               onLiveAssist={setLiveAssist}
+              handsFreeAudio={handsFreeAudio}
+              onHandsFreeAudio={setHandsFreeAudio}
+              disabled={preparingAudio}
             />
             <div className="train-setup">
               <label>
@@ -1978,7 +2044,8 @@ function Measure({
             <div className="button-row">
               <button
                 type="button"
-                onClick={() => {
+                disabled={preparingAudio}
+                onClick={async () => {
                   if (datasetIntent !== "none") {
                     const recordingConsent = consents.find(
                       (entry) =>
@@ -2020,10 +2087,18 @@ function Measure({
                   } else {
                     setPreflightMessage(undefined);
                   }
+                  if (handsFreeAudio && selectedDrill) {
+                    setPreparingAudio(true);
+                    try {
+                      await prepareHandsFreeDrill(selectedDrill);
+                    } finally {
+                      setPreparingAudio(false);
+                    }
+                  }
                   start(wantRecord && !liveAssist);
                 }}
               >
-                Start drill
+                {preparingAudio ? "Giving audio instructions…" : "Start drill"}
               </button>
               <button
                 type="button"
@@ -2043,12 +2118,16 @@ function Measure({
           <TrainActiveChrome
             train={{ ...train, recording }}
             onEmergencyStop={() => {
+              cancelCoachingAudio();
               const stopped = emergencyStop(trainRef.current ?? train);
               setTrain(stopped);
               trainRef.current = stopped;
               void stop("incomplete", "Emergency stop");
             }}
             onStop={() => {
+              if (train.config.handsFreeAudio) {
+                void playCoachingTone("complete");
+              }
               void stop("complete");
             }}
           />
@@ -2253,6 +2332,7 @@ function Review({
             events: selected.events,
             cues: selected.cues,
             drill: reviewDrill,
+            speakingWindows: selected.speakingWindows,
           })
         : [],
     [reviewDrill, reviewOriginUs, selected, timelineDurationUs],
@@ -2410,6 +2490,7 @@ function Review({
       events: selected.events,
       corrections: selected.corrections,
       cues: selected.cues ?? [],
+      speakingWindows: selected.speakingWindows ?? [],
     });
   };
 
@@ -2421,6 +2502,7 @@ function Review({
       events: selected.events,
       cues: selected.cues,
       drill: reviewDrill,
+      speakingWindows: selected.speakingWindows,
       originUs: reviewOriginUs,
       durationUs: timelineDurationUs || 1,
     });
@@ -2694,6 +2776,11 @@ export default function App() {
     useState<string>();
   const videoRef = useRef<HTMLVideoElement>(null);
   const activeProfile = profiles.find((profile) => profile.id === activeId);
+  const currentPromptDisplay = useCurrentDisplayPlacement();
+  const activePromptPlacementIssue = getPromptPlacementIssue(
+    activeProfile,
+    currentPromptDisplay,
+  );
   const activeCalibration = selectActiveCalibration(
     calibrations,
     activeProfile,
@@ -3042,10 +3129,14 @@ export default function App() {
 
   const updateLensAnchor = async (anchor: { x: number; y: number }) => {
     if (!activeProfile) return;
-    const updated = { ...activeProfile, lensAnchor: anchor, updatedAt: new Date().toISOString() };
     try {
-      await store.profiles.put(updated);
-      setProfiles((values) => values.map((profile) => profile.id === updated.id ? updated : profile));
+      const promptDisplay = await readCurrentDisplayPlacement();
+      await mutateStoredProfile(activeProfile.id, (profile) => ({
+        ...profile,
+        lensAnchor: anchor,
+        promptDisplay: promptDisplay ?? profile.promptDisplay,
+        updatedAt: new Date().toISOString(),
+      }));
     } catch (cause) {
       setError(
         `Lens anchor could not be saved: ${
@@ -3131,6 +3222,7 @@ export default function App() {
           onSession={upsertSession}
           debug={debug}
           calibrationIssue={calibrationIssue}
+          promptPlacementIssue={activePromptPlacementIssue}
           onLiveAssistSnapshot={setLiveAssistSnapshot}
           consents={consents}
           initialDrillId={pendingDrillId}

@@ -5,6 +5,7 @@ import type {
   SessionManifest,
 } from "../../contracts/src";
 import { stampDrillOnSession } from "./drills";
+import { AUDIO_GUIDANCE_VERSION } from "./audio-guidance";
 
 export type TrainPhase =
   | "select"
@@ -28,6 +29,7 @@ export interface TrainSessionConfig {
   comfortBefore?: number;
   record: boolean;
   liveAssist?: boolean;
+  handsFreeAudio?: boolean;
   countdownSec?: number;
 }
 
@@ -195,6 +197,10 @@ export function buildCoachedManifest(
     comfortAfter: state.comfortAfter,
     reflectionNotes: state.reflectionNotes,
     completed: state.completed,
+    handsFreeAudio: state.config.handsFreeAudio,
+    audioGuidanceVersion: state.config.handsFreeAudio
+      ? AUDIO_GUIDANCE_VERSION
+      : undefined,
   };
   return { ...stamped, coaching };
 }

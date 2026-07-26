@@ -44,6 +44,7 @@ describe("train session loop", () => {
       sessionGoal: "Stay soft on the lens",
       comfortBefore: 2,
       record: true,
+      handsFreeAudio: true,
     });
     expect(recordingStateLabel(state)).toBe("NOT RECORDING");
     state = beginCountdown(state);
@@ -69,6 +70,10 @@ describe("train session loop", () => {
     expect(manifest.coaching?.comfortAfter).toBe(4);
     expect(manifest.coaching?.reflectionNotes).toEqual(["Felt natural"]);
     expect(manifest.coaching?.completed).toBe(true);
+    expect(manifest.coaching?.handsFreeAudio).toBe(true);
+    expect(manifest.coaching?.audioGuidanceVersion).toBe(
+      "hands-free-audio/1.0.0",
+    );
   });
 
   it("emergency stop is always available and clears recording", () => {

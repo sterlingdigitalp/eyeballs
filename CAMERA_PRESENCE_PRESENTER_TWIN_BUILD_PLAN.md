@@ -3,7 +3,7 @@ title: "Camera Presence Coach & Presenter Twin — Complete Build Plan"
 version: "1.1"
 date: "2026-07-25"
 last_progress_update: "2026-07-26"
-status: "Phase 1 engineering largely complete (hardware acceptance open); Phase 2 integrated coaching prototype; Phase 3 domain scaffolding/UI prototype only — not an operational dataset engine. CaptureCore: provisional Swift sidecar charter in docs/CAPTURE_CORE_CHARTER.md + ADR-004 (not implemented)"
+status: "Phase 1 engineering largely complete (hardware acceptance open); Phase 2 integrated coaching prototype under MVP hardening; Phase 3 domain scaffolding/UI prototype on this branch. CaptureCore is implemented through Stage 5 on feature/capture-core; Stage 6 hardware hardening and soaks are in progress"
 platform_priority: "macOS first, local-first"
 working_product_name: "Camera Presence Coach"
 ---
@@ -1950,6 +1950,40 @@ Out of scope:
 - voice cloning;
 - real-time generated avatar;
 - automatic public-stream integration.
+
+### 12.2.1 Implementation status — 2026-07-26
+
+Phase 2 is being hardened on `agent/phase-2-prototype-checkpoint`, building on
+the existing coaching prototype rather than replacing it.
+
+Implemented and covered by device-free tests:
+
+- versioned drill schema and six built-in curriculum drills;
+- restrained feedback engine with blink/unknown suppression, cooldowns,
+  evidence logs, cue ratings, and recovery handling;
+- lens-adjacent prompt width, reveal modes, and large-text mode;
+- VAD speaking-window persistence through checkpoints, browser/native
+  checkpoint merging, review lanes, analysis exports, progress calculations,
+  and Markdown/JSON session reports;
+- hands-free drill guidance: spoken instruction, four-second settle interval,
+  distinct start tone, automatic timed-drill completion, and completion chime;
+- display/profile prompt binding using Tauri monitor geometry, with a warning
+  when the app window moves to a display that does not match the saved lens
+  placement.
+
+Still requiring live validation after CaptureCore releases the Brio and Yeti:
+
+- speech-synthesis voice and tone audibility in the packaged Tauri app;
+- one complete hands-free Level 1 run using the top-monitor Brio calibration;
+- movement-warning behavior across the four-display desk setup.
+
+Still open for later Phase 2 slices:
+
+- four additional built-in drills plus custom prompt/outline UI;
+- local ASR and editable sentence alignment;
+- review zoom, keyboard navigation, bookmarks, and richer annotations;
+- rolling progress visualization and corrected recommendation usefulness flow;
+- real transparent always-on-top Tauri live-assist window and global shortcut.
 
 ### 12.3 Work package P2-A — Drill engine
 

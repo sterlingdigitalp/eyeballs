@@ -89,6 +89,15 @@ const preferredCheckpoint = (
 const longer = <T>(first: T[], second: T[]): T[] =>
   first.length >= second.length ? first : second;
 
+const optionalLonger = <T>(
+  first: T[] | undefined,
+  second: T[] | undefined,
+): T[] | undefined => {
+  if (!first) return second;
+  if (!second) return first;
+  return longer(first, second);
+};
+
 export function mergeStoredSessions(
   browserSessions: StoredSession[],
   nativeSessions: StoredSession[] = [],
@@ -112,6 +121,11 @@ export function mergeStoredSessions(
       predictions: longer(browser.predictions, native.predictions),
       events: longer(browser.events, native.events),
       corrections: longer(browser.corrections, native.corrections),
+      cues: optionalLonger(browser.cues, native.cues),
+      speakingWindows: optionalLonger(
+        browser.speakingWindows,
+        native.speakingWindows,
+      ),
       calibrationSnapshot:
         browser.calibrationSnapshot ?? native.calibrationSnapshot,
       media: browser.media ?? native.media,

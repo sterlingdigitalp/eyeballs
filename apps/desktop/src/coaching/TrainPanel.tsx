@@ -28,6 +28,8 @@ export function DrillSetupForm({
   onLargeText,
   liveAssist,
   onLiveAssist,
+  handsFreeAudio,
+  onHandsFreeAudio,
   disabled,
 }: {
   drills: DrillDefinition[];
@@ -45,6 +47,8 @@ export function DrillSetupForm({
   onLargeText: (value: boolean) => void;
   liveAssist: boolean;
   onLiveAssist: (value: boolean) => void;
+  handsFreeAudio: boolean;
+  onHandsFreeAudio: (value: boolean) => void;
   disabled?: boolean;
 }) {
   const selected = drills.find((drill) => drill.id === selectedId) ?? drills[0];
@@ -97,6 +101,15 @@ export function DrillSetupForm({
           disabled={disabled}
           onChange={(event) => onComfortBefore(Number(event.target.value) || 3)}
         />
+      </label>
+      <label className="feature-flag">
+        <input
+          type="checkbox"
+          checked={handsFreeAudio}
+          disabled={disabled}
+          onChange={(event) => onHandsFreeAudio(event.target.checked)}
+        />
+        Hands-free spoken instructions and timing tones
       </label>
       <label className="feature-flag">
         <input

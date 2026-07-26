@@ -89,9 +89,40 @@ describe("session checkpoint merge", () => {
   it("keeps the most complete arrays even if the other checkpoint has a later status", () => {
     const browser = session("1", "recording", 50);
     const native = session("1", "incomplete", 45);
+    browser.cues = [{
+      id: "cue-1",
+      kind: "halo",
+      timestampUs: 2_000,
+      evidence: ["break_ms=1200"],
+    }];
+    browser.speakingWindows = [{ startUs: 2_000, endUs: 3_000 }];
     const [merged] = mergeStoredSessions([browser], [native]);
     expect(merged.manifest.status).toBe("incomplete");
     expect(merged.features).toHaveLength(50);
+    expect(merged.cues).toEqual(browser.cues);
+    expect(merged.speakingWindows).toEqual(browser.speakingWindows);
+  });
+
+  it("keeps the richer native coaching evidence when browser evidence is stale", () => {
+    const browser = session("1", "recording", 40);
+    browser.cues = [];
+    browser.speakingWindows = [{ startUs: 2_000, endUs: 3_000 }];
+    const native = session("1", "complete", 42);
+    native.cues = [
+      {
+        id: "cue-1",
+        kind: "quiet_sound",
+        timestampUs: 2_500,
+        evidence: ["break_ms=1400"],
+      },
+    ];
+    native.speakingWindows = [
+      { startUs: 2_000, endUs: 3_000 },
+      { startUs: 4_000, endUs: 6_000 },
+    ];
+    const [merged] = mergeStoredSessions([browser], [native]);
+    expect(merged.cues).toEqual(native.cues);
+    expect(merged.speakingWindows).toEqual(native.speakingWindows);
   });
 
   it("returns unique sessions newest first", () => {

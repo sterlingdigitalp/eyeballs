@@ -7,7 +7,7 @@ import type {
   SessionManifest,
 } from "../../contracts/src";
 import type { SentenceBoundary, SpeakingWindow } from "./speaking";
-import { stubTranscript } from "./speaking";
+import { speakingSeconds, stubTranscript } from "./speaking";
 
 export interface TimelineSegment {
   startUs: number;
@@ -242,6 +242,7 @@ export interface SessionReport {
     cueCount: number;
     breakCount: number;
     recoveryCount: number;
+    speakingSeconds: number;
     contactRatio?: number;
     drillId?: string;
     feedbackIntensity?: string;
@@ -282,6 +283,7 @@ export function buildSessionReport(args: {
   const breakCount = args.events.filter((event) => event.type === "break").length;
   const recoveryCount = args.events.filter((event) => event.type === "recovery").length;
   const cueCount = args.cues?.length ?? 0;
+  const spokenSeconds = speakingSeconds(args.speakingWindows ?? []);
   const markdown = [
     `# Session report`,
     ``,
@@ -295,6 +297,7 @@ export function buildSessionReport(args: {
     `- Breaks: ${breakCount}`,
     `- Recoveries: ${recoveryCount}`,
     `- Cues: ${cueCount}`,
+    `- Speaking: ${spokenSeconds.toFixed(1)}s`,
     ``,
     `## Lanes`,
     ...lanes.map(
@@ -312,6 +315,7 @@ export function buildSessionReport(args: {
       cueCount,
       breakCount,
       recoveryCount,
+      speakingSeconds: spokenSeconds,
       contactRatio,
       drillId: args.manifest.coaching?.drillId,
       feedbackIntensity: args.manifest.coaching?.feedbackIntensity,

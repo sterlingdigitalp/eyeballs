@@ -8,6 +8,18 @@ export const featureFlagsSchema = z.object({
 });
 export type FeatureFlags = z.infer<typeof featureFlagsSchema>;
 
+export const promptDisplayPlacementSchema = z.object({
+  name: z.string().min(1).optional(),
+  positionX: z.number().int(),
+  positionY: z.number().int(),
+  width: z.number().int().positive(),
+  height: z.number().int().positive(),
+  scaleFactor: z.number().positive(),
+});
+export type PromptDisplayPlacement = z.infer<
+  typeof promptDisplayPlacementSchema
+>;
+
 export const captureProfileSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
@@ -42,6 +54,8 @@ export const captureProfileSchema = z.object({
     })
     .optional(),
   lensAnchor: z.object({ x: z.number().min(0).max(1), y: z.number().min(0).max(1) }),
+  /** Display geometry where lens-adjacent prompt placement was last aligned. */
+  promptDisplay: promptDisplayPlacementSchema.optional(),
   updatedAt: z.string().datetime(),
 });
 export type CaptureProfile = z.infer<typeof captureProfileSchema>;
@@ -283,6 +297,8 @@ export const sessionCoachingSchema = z.object({
   comfortAfter: z.number().int().min(1).max(5).optional(),
   reflectionNotes: z.array(z.string()).optional(),
   completed: z.boolean().optional(),
+  handsFreeAudio: z.boolean().optional(),
+  audioGuidanceVersion: z.string().min(1).optional(),
   liveAssist: z.boolean().optional(),
 });
 export type SessionCoaching = z.infer<typeof sessionCoachingSchema>;

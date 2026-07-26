@@ -78,6 +78,7 @@ describe("review timeline", () => {
       events,
       cues,
       drill,
+      speakingWindows: [{ startUs: 1_250_000, endUs: 2_250_000 }],
       sentences: [
         { index: 0, startUs: 100_000, endUs: 900_000, text: "Hello world." },
       ],
@@ -100,6 +101,16 @@ describe("review timeline", () => {
 
     const notes = lanes.find((lane) => lane.id === "notes")!;
     expect(notes.segments.length).toBeGreaterThan(0);
+
+    const speaking = lanes.find((lane) => lane.id === "speaking")!;
+    expect(speaking.segments).toEqual([
+      {
+        startUs: 250_000,
+        endUs: 1_250_000,
+        label: "speech-1",
+        kind: "speaking",
+      },
+    ]);
 
     const transcript = lanes.find((lane) => lane.id === "transcript")!;
     expect(transcript.markers.some((marker) => marker.kind === "sentence_boundary")).toBe(true);
@@ -129,15 +140,18 @@ describe("review timeline", () => {
       events,
       cues,
       drill,
+      speakingWindows: [{ startUs: 1_250_000, endUs: 2_750_000 }],
       originUs,
       durationUs: 3_000_000,
     });
     expect(report.format).toBe("camera-presence-session-report/1.0.0");
     expect(report.summary.cueCount).toBe(1);
     expect(report.summary.breakCount).toBe(1);
+    expect(report.summary.speakingSeconds).toBe(1.5);
     expect(report.summary.drillId).toBe("presentation-rehearsal-01");
     expect(report.markdown).toContain("# Session report");
     expect(report.markdown).toContain("Cues: 1");
+    expect(report.markdown).toContain("Speaking: 1.5s");
     expect(report.lanes.length).toBe(6);
   });
 });
