@@ -357,7 +357,9 @@ final class CaptureRecorder: NSObject, AVCaptureVideoDataOutputSampleBufferDeleg
             let dims = CMVideoFormatDescriptionGetDimensions(format.formatDescription)
             let ranges = format.videoSupportedFrameRateRanges
             guard !ranges.isEmpty else { continue }
-            let supportsTarget = ranges.contains { $0.minFrameRate - 0.05 <= targetFps && targetFps <= $0.maxFrameRate + 0.05 }
+            let supportsTarget = ranges.contains {
+                $0.minFrameRate - 0.05 <= targetFps && targetFps <= $0.maxFrameRate + 0.05
+            }
             let maxFps = ranges.map(\.maxFrameRate).max() ?? 0
             let bestFps: Double
             if supportsTarget {
@@ -386,7 +388,9 @@ final class CaptureRecorder: NSObject, AVCaptureVideoDataOutputSampleBufferDeleg
 
         // Prefer candidates that support target fps; among them lowest score.
         let ordered = candidates.sorted { a, b in
-            if a.supportsTargetFps != b.supportsTargetFps { return a.supportsTargetFps && !b.supportsTargetFps }
+            if a.supportsTargetFps != b.supportsTargetFps {
+                return a.supportsTargetFps && !b.supportsTargetFps
+            }
             return a.score < b.score
         }
         guard let pick = ordered.first else {
@@ -397,20 +401,22 @@ final class CaptureRecorder: NSObject, AVCaptureVideoDataOutputSampleBufferDeleg
             return
         }
 
+        // Select activeFormat only. Do NOT set activeVideoMin/MaxFrameDuration on UVC/DAL
+        // devices (Logitech BRIO): invalid durations throw NSException → process abort(),
+        // and Swift `try` cannot catch that. Delivery fps is verified via health/ffprobe.
         device.activeFormat = pick.format
-        let fps = pick.bestFpsInRange
-        let duration = CMTime(value: 1, timescale: CMTimeScale(max(1, Int32(fps.rounded()))))
-        if pick.format.videoSupportedFrameRateRanges.contains(where: {
-            $0.minFrameRate - 0.05 <= fps && fps <= $0.maxFrameRate + 0.05
-        }) {
-            device.activeVideoMinFrameDuration = duration
-            device.activeVideoMaxFrameDuration = duration
-        }
         negotiatedWidth = Int(pick.width)
         negotiatedHeight = Int(pick.height)
-        negotiatedFrameRate = fps
+        let rangeMax =
+            device.activeFormat.videoSupportedFrameRateRanges.map(\.maxFrameRate).max()
+            ?? pick.bestFpsInRange
+        let rangeMin =
+            device.activeFormat.videoSupportedFrameRateRanges.map(\.minFrameRate).min()
+            ?? pick.bestFpsInRange
+        // Report the fps we expect the format to run near (clamped desired into range).
+        negotiatedFrameRate = min(max(pick.bestFpsInRange, rangeMin), rangeMax)
         protocolWriter.log(
-            "configure: activeFormat \(negotiatedWidth)x\(negotiatedHeight) @ \(String(format: "%.2f", negotiatedFrameRate)) fps (requested \(targetW)x\(targetH)@\(targetFps), supportsTargetFps=\(pick.supportsTargetFps))"
+            "configure: activeFormat \(negotiatedWidth)x\(negotiatedHeight) range \(String(format: "%.2f", rangeMin))–\(String(format: "%.2f", rangeMax)) fps, expected ~\(String(format: "%.2f", negotiatedFrameRate)) (requested \(targetW)x\(targetH)@\(targetFps), supportsTargetFps=\(pick.supportsTargetFps)); frame-duration lock skipped for UVC safety"
         )
     }
 
