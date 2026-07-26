@@ -43,6 +43,7 @@ describe("buildCaptureCoreRecordRequest", () => {
     expect(req.audio).toEqual({ sampleRate: 48_000, channelCount: 1 });
     expect(req.dryRun).toBe(true);
     expect(req.maxDurationSec).toBe(30);
+    expect(req.segmentDurationSec).toBe(10);
   });
 
   it("omits mic when videoOnly", () => {

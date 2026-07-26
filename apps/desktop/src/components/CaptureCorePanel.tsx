@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
 import {
+  CAPTURE_CORE_DEFAULT_SEGMENT_SEC,
   shortSha256,
   type CaptureCoreRunResult,
   type CaptureProfile,
 } from "../../../../packages/contracts/src";
 import {
   captureCoreDryRun,
+  captureCoreLiveRecord,
   captureCoreReconcileProfile,
   captureCoreScanOrphans,
   captureCoreSessionsRoot,
@@ -35,6 +37,7 @@ export function CaptureCorePanel({ profile, onReleaseMedia, onProfilePatched }: 
   const [orphans, setOrphans] = useState<OrphanRow[]>([]);
   const [lastRun, setLastRun] = useState<CaptureCoreRunResult>();
   const [bindNote, setBindNote] = useState<string>();
+  const [liveSeconds, setLiveSeconds] = useState(15);
 
   const refreshOrphans = useCallback(async () => {
     if (!host) return;
@@ -62,7 +65,10 @@ export function CaptureCorePanel({ profile, onReleaseMedia, onProfilePatched }: 
     void refreshOrphans();
   }, [refreshOrphans]);
 
-  const runDryRun = async () => {
+  const runWith = async (
+    kind: "dry" | "live",
+    action: () => Promise<CaptureCoreRunResult>,
+  ) => {
     if (!profile) {
       setError("Choose a capture profile on Setup first.");
       return;
@@ -72,26 +78,54 @@ export function CaptureCorePanel({ profile, onReleaseMedia, onProfilePatched }: 
     setBindNote(undefined);
     onReleaseMedia();
     try {
-      const result = await captureCoreDryRun({ profile, maxDurationSec: 1 });
+      const result = await action();
       setLastRun(result);
-      void logEvent("capture_core_dry_run_complete", {
+      void logEvent(kind === "dry" ? "capture_core_dry_run_complete" : "capture_core_live_complete", {
         fields: {
           exitCode: result.exitCode,
           segmentCount: result.segmentHashes.length,
           sessionRoot: result.sessionRoot,
+          dryRun: result.dryRun,
         },
       });
       await refreshOrphans();
+      if (result.exitCode !== 0) {
+        setError(`CaptureCore exited with code ${result.exitCode}`);
+      }
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : String(cause);
       setError(message);
-      void logEvent("capture_core_dry_run_failed", {
+      void logEvent(kind === "dry" ? "capture_core_dry_run_failed" : "capture_core_live_failed", {
         level: "error",
         fields: { message },
       });
     } finally {
       setBusy(false);
     }
+  };
+
+  const runDryRun = () =>
+    void runWith("dry", () =>
+      captureCoreDryRun({
+        profile: profile!,
+        maxDurationSec: 1,
+        segmentDurationSec: 0.4,
+      }),
+    );
+
+  const runLive = () => {
+    if (!profile?.deviceBindings?.avFoundationCameraId) {
+      setError("Bind an AVFoundation camera first (Match devices by name), or set bindings on Setup.");
+      return;
+    }
+    const seconds = Math.min(120, Math.max(5, liveSeconds));
+    void runWith("live", () =>
+      captureCoreLiveRecord({
+        profile: profile!,
+        maxDurationSec: seconds,
+        segmentDurationSec: Math.min(CAPTURE_CORE_DEFAULT_SEGMENT_SEC, seconds),
+      }),
+    );
   };
 
   const bindDevices = async () => {
@@ -120,6 +154,7 @@ export function CaptureCorePanel({ profile, onReleaseMedia, onProfilePatched }: 
 
   const bindings = profile?.deviceBindings;
   const avReady = Boolean(bindings?.avFoundationCameraId);
+  const success = lastRun && lastRun.exitCode === 0;
 
   return (
     <section className="screen dataset-screen">
@@ -127,9 +162,8 @@ export function CaptureCorePanel({ profile, onReleaseMedia, onProfilePatched }: 
         <p className="eyebrow">Dataset</p>
         <h1>CaptureCore masters</h1>
         <p className="lede">
-          Software path first: dry-run writes sealed segment placeholders under Application
-          Support, hashed in Rust. Live camera stays off until Stage 0 runs from a TCC-capable
-          host.
+          Practice camera is released before every take. Dry-run seals software layout; live
+          record uses Brio/Yeti (or bound AV devices) with short segments for recovery.
         </p>
       </div>
 
@@ -142,11 +176,7 @@ export function CaptureCorePanel({ profile, onReleaseMedia, onProfilePatched }: 
 
       <div className="dataset-grid">
         <div className="panel">
-          <h2>Software dry-run</h2>
-          <p className="muted">
-            Uses the active profile. Releases the practice camera first so Dataset never shares
-            the device with CaptureCore.
-          </p>
+          <h2>Record</h2>
           <dl className="dataset-facts">
             <div>
               <dt>Profile</dt>
@@ -155,10 +185,12 @@ export function CaptureCorePanel({ profile, onReleaseMedia, onProfilePatched }: 
             <div>
               <dt>AV camera</dt>
               <dd className={avReady ? "" : "muted"}>
-                {bindings?.avFoundationCameraId
-                  ? "Bound"
-                  : "Not bound (dry-run still works)"}
+                {bindings?.avFoundationCameraId ? "Bound" : "Not bound"}
               </dd>
+            </div>
+            <div>
+              <dt>Segments</dt>
+              <dd>{CAPTURE_CORE_DEFAULT_SEGMENT_SEC}s finalized chunks (default)</dd>
             </div>
             <div>
               <dt>Incomplete sessions</dt>
@@ -166,9 +198,29 @@ export function CaptureCorePanel({ profile, onReleaseMedia, onProfilePatched }: 
             </div>
           </dl>
 
+          <label className="dataset-duration">
+            Live duration (seconds)
+            <input
+              type="number"
+              min={5}
+              max={120}
+              step={5}
+              value={liveSeconds}
+              disabled={busy}
+              onChange={(event) => setLiveSeconds(Number(event.target.value) || 15)}
+            />
+          </label>
+
           <div className="dataset-actions">
-            <button disabled={!host || busy || !profile} onClick={() => void runDryRun()}>
-              {busy ? "Working…" : "Run dry-run record"}
+            <button disabled={!host || busy || !profile || !avReady} onClick={runLive}>
+              {busy ? "Recording…" : `Live record ${Math.min(120, Math.max(5, liveSeconds))}s`}
+            </button>
+            <button
+              className="secondary"
+              disabled={!host || busy || !profile}
+              onClick={runDryRun}
+            >
+              Dry-run
             </button>
             <button
               className="secondary"
@@ -192,11 +244,11 @@ export function CaptureCorePanel({ profile, onReleaseMedia, onProfilePatched }: 
               <span>{error}</span>
             </div>
           )}
-          {lastRun && lastRun.exitCode === 0 && (
+          {success && (
             <div className="notice success" role="status">
-              <strong>Dry-run sealed</strong>
+              <strong>{lastRun.dryRun ? "Dry-run sealed" : "Live take sealed"}</strong>
               <span>
-                {lastRun.segmentHashes.length} segment file
+                {lastRun.segmentHashes.length} file
                 {lastRun.segmentHashes.length === 1 ? "" : "s"} · exit {lastRun.exitCode}
               </span>
             </div>
@@ -207,7 +259,7 @@ export function CaptureCorePanel({ profile, onReleaseMedia, onProfilePatched }: 
           <h2>Last seal</h2>
           {!lastRun && (
             <p className="muted dataset-empty">
-              Run a dry-run to write masters, then see SHA-256 digests here.
+              Run a dry-run or live take to write masters and see SHA-256 digests.
             </p>
           )}
           {lastRun && (
@@ -226,13 +278,12 @@ export function CaptureCorePanel({ profile, onReleaseMedia, onProfilePatched }: 
           )}
           <details className="dataset-details">
             <summary>Developer details</summary>
-            <p className="muted">
-              Sessions root: {sessionsRoot ?? "—"}
-            </p>
+            <p className="muted">Sessions root: {sessionsRoot ?? "—"}</p>
             {lastRun && (
               <p className="muted">
                 Session: {lastRun.sessionRoot}
-                {lastRun.sealPath ? ` · seal written` : ""}
+                {lastRun.sealPath ? " · seal written" : ""}
+                {lastRun.dryRun ? " · dry-run" : " · live"}
               </p>
             )}
             {orphans.length > 0 && (

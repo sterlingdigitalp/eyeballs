@@ -15,6 +15,7 @@ cat > "$REQ" <<EOF
   "cameraUniqueId": "unused",
   "video": { "width": 1280, "height": 720, "frameRate": 30 },
   "maxDurationSec": 1,
+  "segmentDurationSec": 0.4,
   "dryRun": true
 }
 EOF
@@ -24,7 +25,10 @@ OUT="$SESSION/events.jsonl"
 grep -q '"type":"recording_finished"' "$OUT"
 grep -q '"type":"segment_finalized"' "$OUT"
 grep -q '"state":"finished"' "$OUT"
+# Multi-segment dry-run (1 / 0.4 → 3 placeholders)
 test -f "$SESSION/master/segments/seg_000_video.mov"
+test -f "$SESSION/master/segments/seg_001_video.mov"
+test -f "$SESSION/master/segments/seg_002_video.mov"
 # On-disk seal for orphan scan (Swift side)
 test -f "$SESSION/recording-finished.json"
 grep -q '"status"[[:space:]]*:[[:space:]]*"complete"' "$SESSION/recording-finished.json"

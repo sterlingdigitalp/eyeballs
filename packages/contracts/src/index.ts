@@ -99,8 +99,13 @@ export const captureCoreRecordRequestSchema = z.object({
   maxDurationSec: z.number().positive().optional(),
   videoOnly: z.boolean().optional(),
   dryRun: z.boolean().optional(),
+  /** Prefer Linear PCM audio masters (CaptureCore default true). */
+  preferPcmAudio: z.boolean().optional(),
 });
 export type CaptureCoreRecordRequest = z.infer<typeof captureCoreRecordRequestSchema>;
+
+/** Default immutable segment length (seconds) — short for kill recovery. */
+export const CAPTURE_CORE_DEFAULT_SEGMENT_SEC = 10;
 
 export const captureCoreSegmentHashSchema = z.object({
   path: z.string(),
@@ -144,6 +149,7 @@ export function buildCaptureCoreRecordRequest(input: {
   segmentDurationSec?: number;
   dryRun?: boolean;
   videoOnly?: boolean;
+  preferPcmAudio?: boolean;
 }): CaptureCoreRecordRequest {
   const ids = captureCoreDeviceIds(input.profile);
   const video = input.profile.negotiatedVideo ?? input.profile.requestedVideo;
@@ -166,9 +172,10 @@ export function buildCaptureCoreRecordRequest(input: {
             channelCount: audio.channelCount,
           },
     maxDurationSec: input.maxDurationSec,
-    segmentDurationSec: input.segmentDurationSec,
+    segmentDurationSec: input.segmentDurationSec ?? CAPTURE_CORE_DEFAULT_SEGMENT_SEC,
     videoOnly: input.videoOnly,
     dryRun: input.dryRun,
+    preferPcmAudio: input.preferPcmAudio,
   });
 }
 

@@ -32,6 +32,8 @@ pub struct CaptureRecordRequest {
     pub video_only: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dry_run: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prefer_pcm_audio: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -530,10 +532,11 @@ mod tests {
                 frame_rate: 30.0,
             },
             audio: None,
-            segment_duration_sec: None,
+            segment_duration_sec: Some(0.4),
             max_duration_sec: Some(1.0),
             video_only: None,
             dry_run: Some(true),
+            prefer_pcm_audio: None,
         };
         let result = run_capture_record(request).expect("dry-run should succeed");
         assert_eq!(result.exit_code, 0);
@@ -548,10 +551,16 @@ mod tests {
             .join("segments")
             .join("seg_000_video.mov")
             .is_file());
+        // Multi-segment dry-run with 1s / 0.4s → three placeholders
+        assert!(session_root
+            .join("master")
+            .join("segments")
+            .join("seg_002_video.mov")
+            .is_file());
         assert!(session_root.join("recording-finished.json").is_file());
         assert!(result.seal_path.is_some());
         assert!(session_root.join("session-seal.json").is_file());
-        assert!(!result.segment_hashes.is_empty());
+        assert!(result.segment_hashes.len() >= 3);
         assert_eq!(result.segment_hashes[0].sha256.len(), 64);
     }
 }

@@ -124,10 +124,20 @@ Expect: `state starting → recording → segment_finalized → recording_finish
 | `reconcileDeviceBindings` by name | Contracts + tests |
 | Dataset page dry-run UI | `CaptureCorePanel` + nav |
 
+## Software progress (post Stage 0 hardware)
+
+| Item | Status |
+|---|---|
+| Default segment duration **10s** (was 60) | Swift + contracts |
+| Dry-run multi-segment protocol | `segmentDurationSec` without 5s floor |
+| `movieFragmentInterval` 2s on video writer | Kill-path partial readability |
+| Prefer target fps in `activeFormat` selection | Logged negotiated WxH@fps |
+| PCM audio masters default (`preferPcmAudio`) | LPCM in CAF; AAC optional |
+| Dataset **Live record** + duration control | `CaptureCorePanel` |
+
 ## Next (Stage 2–4)
 
 1. ~~Human dual short take~~ **Done**. ~~Kill recovery~~ **Done** (partial files, no finish marker).  
-2. Live Dataset record in Tauri (release webview camera → real record, not only dry-run).  
-3. Harden: force 30 fps format if available; PCM audio masters; kill-safe segment finalization / rotation.  
-4. Package capture-core as Tauri externalBin sidecar for release builds.  
-5. Later: 1h soak + failure matrix before ADR-004 → Accepted.
+2. Re-verify live dual take after PCM + fps + fragment changes (short Terminal take).  
+3. Package capture-core as Tauri externalBin sidecar for release builds.  
+4. Later: 1h soak + failure matrix before ADR-004 → Accepted.

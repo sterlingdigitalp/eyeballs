@@ -31,6 +31,12 @@ final class CaptureRecorder: NSObject, AVCaptureVideoDataOutputSampleBufferDeleg
     private var videoAppendFailures: UInt64 = 0
     private var audioAppendFailures: UInt64 = 0
 
+    /// Actual dimensions / fps after activeFormat selection (used by writers + health).
+    private var negotiatedWidth: Int = 0
+    private var negotiatedHeight: Int = 0
+    private var negotiatedFrameRate: Double = 0
+    private var finalizedSegmentCount: Int = 0
+
     private var isStopping = false
     private var isCancelled = false
     private var sessionRunning = false
@@ -111,39 +117,51 @@ final class CaptureRecorder: NSObject, AVCaptureVideoDataOutputSampleBufferDeleg
     }
 
     /// Validates layout + protocol without TCC/camera (agent CI / dry-run).
+    /// Emits multiple finalized segment placeholders when maxDuration > segment duration.
     private func runDryRun() async -> CaptureCoreExitCode {
         protocolWriter.log("dryRun: skipping AVCapture; exercising protocol + segment layout")
         protocolWriter.emit(type: "state", payload: ["state": "recording", "dryRun": true])
-        let duration = min(request.maxDurationSec ?? 1, 2)
-        let index = 0
-        let videoURL = segmentsDir.appendingPathComponent(String(format: "seg_%03d_video.mov", index))
-        let marker = "capture-core dry-run placeholder — not a real master\n"
-        try? marker.write(to: videoURL, atomically: true, encoding: .utf8)
+        let total = min(request.maxDurationSec ?? 1, 3)
+        // Dry-run skips the 5s production floor so multi-segment protocol can be exercised quickly.
+        let configuredSeg = request.segmentDurationSec ?? min(1.0, total)
+        let segmentLen = min(max(0.25, configuredSeg), max(0.25, total))
+        let segmentCount = max(1, Int(ceil(total / segmentLen - 1e-9)))
         protocolWriter.emit(
             type: "health",
             payload: [
                 "state": "recording",
                 "dryRun": true,
                 "segmentIndex": 0,
+                "plannedSegments": segmentCount,
+                "segmentDurationSec": segmentLen,
                 "diskFreeBytes": freeDiskBytes(at: segmentsDir) ?? -1,
             ]
         )
-        try? await Task.sleep(nanoseconds: UInt64(max(0.2, duration) * 1_000_000_000))
-        protocolWriter.emit(
-            type: "segment_finalized",
-            payload: [
-                "segmentIndex": 0,
-                "reason": "dry_run",
-                "videoPath": videoURL.path,
-            ]
-        )
+        for index in 0..<segmentCount {
+            let videoURL = segmentsDir.appendingPathComponent(String(format: "seg_%03d_video.mov", index))
+            let marker =
+                "capture-core dry-run placeholder seg=\(index) — not a real master\n"
+            try? marker.write(to: videoURL, atomically: true, encoding: .utf8)
+            try? await Task.sleep(nanoseconds: UInt64(max(0.05, min(0.25, segmentLen)) * 1_000_000_000))
+            protocolWriter.emit(
+                type: "segment_finalized",
+                payload: [
+                    "segmentIndex": index,
+                    "reason": index + 1 < segmentCount ? "segment_duration" : "dry_run",
+                    "videoPath": videoURL.path,
+                    "dryRun": true,
+                ]
+            )
+            finalizedSegmentCount += 1
+        }
         let finishedPayload: [String: Any] = [
             "exitCode": 0,
             "cancelled": false,
-            "segments": 1,
+            "segments": segmentCount,
             "dryRun": true,
             "sessionRoot": request.sessionRoot,
             "status": "complete",
+            "segmentDurationSec": request.resolvedSegmentDurationSec,
         ]
         protocolWriter.emit(type: "recording_finished", payload: finishedPayload)
         writeSessionMarker(name: "recording-finished.json", payload: finishedPayload)
@@ -187,12 +205,17 @@ final class CaptureRecorder: NSObject, AVCaptureVideoDataOutputSampleBufferDeleg
         var payload: [String: Any] = [
             "state": isStopping ? "stopping" : "recording",
             "segmentIndex": segmentIndex,
+            "finalizedSegments": finalizedSegmentCount,
             "videoFrames": Int(videoFrames),
             "audioBuffers": Int(audioBuffers),
             "droppedVideo": Int(droppedVideo),
             "videoAppendFailures": Int(videoAppendFailures),
             "audioAppendFailures": Int(audioAppendFailures),
             "diskFreeBytes": diskFree,
+            "negotiatedWidth": negotiatedWidth,
+            "negotiatedHeight": negotiatedHeight,
+            "negotiatedFrameRate": negotiatedFrameRate,
+            "segmentDurationSec": request.resolvedSegmentDurationSec,
         ]
         if let firstVideoPtsUs { payload["firstVideoPtsUs"] = firstVideoPtsUs }
         if let firstAudioPtsUs { payload["firstAudioPtsUs"] = firstAudioPtsUs }
@@ -319,33 +342,76 @@ final class CaptureRecorder: NSObject, AVCaptureVideoDataOutputSampleBufferDeleg
         let targetW = request.video.width
         let targetH = request.video.height
         let targetFps = request.video.frameRate
-        var best: AVCaptureDevice.Format?
-        var bestScore = Double.greatestFiniteMagnitude
+
+        struct Candidate {
+            let format: AVCaptureDevice.Format
+            let width: Int32
+            let height: Int32
+            let supportsTargetFps: Bool
+            let bestFpsInRange: Double
+            let score: Double
+        }
+
+        var candidates: [Candidate] = []
         for format in device.formats {
             let dims = CMVideoFormatDescriptionGetDimensions(format.formatDescription)
             let ranges = format.videoSupportedFrameRateRanges
+            guard !ranges.isEmpty else { continue }
+            let supportsTarget = ranges.contains { $0.minFrameRate - 0.05 <= targetFps && targetFps <= $0.maxFrameRate + 0.05 }
             let maxFps = ranges.map(\.maxFrameRate).max() ?? 0
-            guard maxFps + 0.1 >= min(targetFps, 30) else { continue }
-            let score =
+            let bestFps: Double
+            if supportsTarget {
+                bestFps = targetFps
+            } else {
+                // Closest max frame rate at or below target (prefer not to overclock).
+                bestFps = ranges.map(\.maxFrameRate).filter { $0 <= targetFps + 0.05 }.max() ?? maxFps
+            }
+            // Prefer exact resolution + target fps; heavily penalize missing target fps.
+            let dimScore =
                 abs(Double(dims.width - Int32(targetW))) +
-                abs(Double(dims.height - Int32(targetH))) +
-                abs(maxFps - targetFps) * 10
-            if score < bestScore {
-                bestScore = score
-                best = format
-            }
+                abs(Double(dims.height - Int32(targetH)))
+            let fpsPenalty = supportsTarget ? 0.0 : 50_000.0 + abs(bestFps - targetFps) * 100
+            let score = dimScore + fpsPenalty
+            candidates.append(
+                Candidate(
+                    format: format,
+                    width: dims.width,
+                    height: dims.height,
+                    supportsTargetFps: supportsTarget,
+                    bestFpsInRange: bestFps,
+                    score: score
+                )
+            )
         }
-        if let best {
-            device.activeFormat = best
-            let fps = min(targetFps, best.videoSupportedFrameRateRanges.map(\.maxFrameRate).max() ?? targetFps)
-            let duration = CMTime(value: 1, timescale: CMTimeScale(max(1, Int32(fps.rounded()))))
-            if device.activeFormat.videoSupportedFrameRateRanges.contains(where: {
-                $0.minFrameRate <= fps && fps <= $0.maxFrameRate
-            }) {
-                device.activeVideoMinFrameDuration = duration
-                device.activeVideoMaxFrameDuration = duration
-            }
+
+        // Prefer candidates that support target fps; among them lowest score.
+        let ordered = candidates.sorted { a, b in
+            if a.supportsTargetFps != b.supportsTargetFps { return a.supportsTargetFps && !b.supportsTargetFps }
+            return a.score < b.score
         }
+        guard let pick = ordered.first else {
+            negotiatedWidth = targetW
+            negotiatedHeight = targetH
+            negotiatedFrameRate = targetFps
+            protocolWriter.log("configure: no camera formats matched; leaving device defaults")
+            return
+        }
+
+        device.activeFormat = pick.format
+        let fps = pick.bestFpsInRange
+        let duration = CMTime(value: 1, timescale: CMTimeScale(max(1, Int32(fps.rounded()))))
+        if pick.format.videoSupportedFrameRateRanges.contains(where: {
+            $0.minFrameRate - 0.05 <= fps && fps <= $0.maxFrameRate + 0.05
+        }) {
+            device.activeVideoMinFrameDuration = duration
+            device.activeVideoMaxFrameDuration = duration
+        }
+        negotiatedWidth = Int(pick.width)
+        negotiatedHeight = Int(pick.height)
+        negotiatedFrameRate = fps
+        protocolWriter.log(
+            "configure: activeFormat \(negotiatedWidth)x\(negotiatedHeight) @ \(String(format: "%.2f", negotiatedFrameRate)) fps (requested \(targetW)x\(targetH)@\(targetFps), supportsTargetFps=\(pick.supportsTargetFps))"
+        )
     }
 
     private func openSegmentWriters() throws {
@@ -363,14 +429,20 @@ final class CaptureRecorder: NSObject, AVCaptureVideoDataOutputSampleBufferDeleg
             try fileManager.removeItem(at: audioURL)
         }
 
+        let width = negotiatedWidth > 0 ? negotiatedWidth : request.video.width
+        let height = negotiatedHeight > 0 ? negotiatedHeight : request.video.height
+        let frameRate = negotiatedFrameRate > 0 ? negotiatedFrameRate : request.video.frameRate
+
         let vWriter = try AVAssetWriter(outputURL: videoURL, fileType: .mov)
+        // Fragmented movies improve partial readability after hard kill of the open segment.
+        vWriter.movieFragmentInterval = CMTime(seconds: 2.0, preferredTimescale: 600)
         let vSettings: [String: Any] = [
             AVVideoCodecKey: AVVideoCodecType.h264,
-            AVVideoWidthKey: request.video.width,
-            AVVideoHeightKey: request.video.height,
+            AVVideoWidthKey: width,
+            AVVideoHeightKey: height,
             AVVideoCompressionPropertiesKey: [
-                AVVideoAverageBitRateKey: max(2_000_000, request.video.width * request.video.height * 4),
-                AVVideoExpectedSourceFrameRateKey: request.video.frameRate,
+                AVVideoAverageBitRateKey: max(2_000_000, width * height * 4),
+                AVVideoExpectedSourceFrameRateKey: frameRate,
             ],
         ]
         let vInput = AVAssetWriterInput(mediaType: .video, outputSettings: vSettings)
@@ -390,14 +462,26 @@ final class CaptureRecorder: NSObject, AVCaptureVideoDataOutputSampleBufferDeleg
         if audioOutput != nil {
             let sampleRate = request.audio?.sampleRate ?? 48_000
             let channels = max(1, request.audio?.channelCount ?? 1)
-            // CAF + AAC is a stable sample-buffer path; PCM can be a later hardening step.
             let aWriter = try AVAssetWriter(outputURL: audioURL, fileType: .caf)
-            let aSettings: [String: Any] = [
-                AVFormatIDKey: kAudioFormatMPEG4AAC,
-                AVSampleRateKey: sampleRate,
-                AVNumberOfChannelsKey: channels,
-                AVEncoderBitRateKey: 128_000,
-            ]
+            let aSettings: [String: Any]
+            if request.resolvedPreferPcmAudio {
+                aSettings = [
+                    AVFormatIDKey: kAudioFormatLinearPCM,
+                    AVSampleRateKey: sampleRate,
+                    AVNumberOfChannelsKey: channels,
+                    AVLinearPCMBitDepthKey: 16,
+                    AVLinearPCMIsFloatKey: false,
+                    AVLinearPCMIsBigEndianKey: false,
+                    AVLinearPCMIsNonInterleaved: false,
+                ]
+            } else {
+                aSettings = [
+                    AVFormatIDKey: kAudioFormatMPEG4AAC,
+                    AVSampleRateKey: sampleRate,
+                    AVNumberOfChannelsKey: channels,
+                    AVEncoderBitRateKey: 128_000,
+                ]
+            }
             let aInput = AVAssetWriterInput(mediaType: .audio, outputSettings: aSettings)
             aInput.expectsMediaDataInRealTime = true
             guard aWriter.canAdd(aInput) else {
@@ -411,13 +495,16 @@ final class CaptureRecorder: NSObject, AVCaptureVideoDataOutputSampleBufferDeleg
             }
             self.audioWriter = aWriter
             self.audioInput = aInput
+            protocolWriter.log(
+                "opened audio segment \(index) pcm=\(request.resolvedPreferPcmAudio) \(sampleRate)Hz ch=\(channels)"
+            )
         } else {
             self.audioWriter = nil
             self.audioInput = nil
         }
 
         segmentStartedAt = CFAbsoluteTimeGetCurrent()
-        protocolWriter.log("opened segment \(index) at \(videoURL.path)")
+        protocolWriter.log("opened segment \(index) at \(videoURL.path) \(width)x\(height)@\(frameRate)")
     }
 
     private func maybeRotateSegment() {
@@ -450,6 +537,9 @@ final class CaptureRecorder: NSObject, AVCaptureVideoDataOutputSampleBufferDeleg
         let index = segmentIndex
         let vURL = videoWriter?.outputURL
         let aURL = audioWriter?.outputURL
+        // No writers yet (failed open) — nothing to finalize.
+        guard videoWriter != nil || audioWriter != nil else { return }
+
         videoInput?.markAsFinished()
         audioInput?.markAsFinished()
 
@@ -468,12 +558,31 @@ final class CaptureRecorder: NSObject, AVCaptureVideoDataOutputSampleBufferDeleg
         }
         group.wait()
 
+        finalizedSegmentCount += 1
         var payload: [String: Any] = [
             "segmentIndex": index,
             "reason": reason,
+            "finalizedSegments": finalizedSegmentCount,
+            "negotiatedWidth": negotiatedWidth,
+            "negotiatedHeight": negotiatedHeight,
+            "negotiatedFrameRate": negotiatedFrameRate,
         ]
-        if let vURL { payload["videoPath"] = vURL.path }
-        if let aURL { payload["audioPath"] = aURL.path }
+        if let vURL {
+            payload["videoPath"] = vURL.path
+            if let attrs = try? fileManager.attributesOfItem(atPath: vURL.path),
+               let size = attrs[.size] as? NSNumber
+            {
+                payload["videoByteLength"] = size.intValue
+            }
+        }
+        if let aURL {
+            payload["audioPath"] = aURL.path
+            if let attrs = try? fileManager.attributesOfItem(atPath: aURL.path),
+               let size = attrs[.size] as? NSNumber
+            {
+                payload["audioByteLength"] = size.intValue
+            }
+        }
         if let firstVideoPtsUs { payload["firstVideoPtsUs"] = firstVideoPtsUs }
         if let firstAudioPtsUs { payload["firstAudioPtsUs"] = firstAudioPtsUs }
         protocolWriter.emit(type: "segment_finalized", payload: payload)

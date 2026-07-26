@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import {
   buildCaptureCoreRecordRequest,
+  CAPTURE_CORE_DEFAULT_SEGMENT_SEC,
   captureCoreDeviceInventorySchema,
   captureCoreRunResultSchema,
   reconcileDeviceBindings,
@@ -29,7 +30,7 @@ export async function captureCorePrepareSession(
   return invoke("capture_core_prepare_session", { sessionId: sessionId ?? null });
 }
 
-/** Tauri invoke: run CaptureCore (prefer dryRun until live TCC parent is ready). */
+/** Tauri invoke: run CaptureCore (prefer dryRun until TCC parent is ready). */
 export async function captureCoreRecord(
   request: CaptureCoreRecordRequest,
 ): Promise<CaptureCoreRunResult> {
@@ -70,24 +71,61 @@ export async function captureCoreListDevices(): Promise<CaptureCoreDeviceInvento
   return captureCoreDeviceInventorySchema.parse(raw);
 }
 
-/**
- * Prepare a confined session dir and run dry-run CaptureCore for the profile.
- * Callers should release webview camera/mic first (required for live; harmless for dry-run).
- */
-export async function captureCoreDryRun(input: {
+type PreparedRecord = {
   profile: CaptureProfile;
   maxDurationSec?: number;
+  segmentDurationSec?: number;
   sessionId?: string;
-}): Promise<CaptureCoreRunResult> {
+  videoOnly?: boolean;
+  preferPcmAudio?: boolean;
+};
+
+async function prepareAndRecord(
+  input: PreparedRecord & { dryRun: boolean },
+): Promise<CaptureCoreRunResult> {
   const prepared = await captureCorePrepareSession(input.sessionId);
   const request = buildCaptureCoreRecordRequest({
     sessionId: prepared.sessionId,
     sessionRoot: prepared.sessionRoot,
     profile: input.profile,
-    dryRun: true,
-    maxDurationSec: input.maxDurationSec ?? 1,
+    dryRun: input.dryRun,
+    maxDurationSec: input.maxDurationSec,
+    segmentDurationSec: input.segmentDurationSec ?? CAPTURE_CORE_DEFAULT_SEGMENT_SEC,
+    videoOnly: input.videoOnly,
+    preferPcmAudio: input.preferPcmAudio,
   });
   return captureCoreRecord(request);
+}
+
+/**
+ * Prepare a confined session dir and run dry-run CaptureCore for the profile.
+ * Callers should release webview camera/mic first (required for live; harmless for dry-run).
+ */
+export async function captureCoreDryRun(
+  input: PreparedRecord,
+): Promise<CaptureCoreRunResult> {
+  return prepareAndRecord({
+    ...input,
+    dryRun: true,
+    maxDurationSec: input.maxDurationSec ?? 1,
+    // Short segments so dry-run can exercise multi-segment protocol in ~1s.
+    segmentDurationSec: input.segmentDurationSec ?? 0.4,
+  });
+}
+
+/**
+ * Live CaptureCore record (requires TCC-capable Tauri/Terminal parent + device bindings).
+ * Always release webview media before calling.
+ */
+export async function captureCoreLiveRecord(
+  input: PreparedRecord,
+): Promise<CaptureCoreRunResult> {
+  return prepareAndRecord({
+    ...input,
+    dryRun: false,
+    maxDurationSec: input.maxDurationSec ?? 15,
+    segmentDurationSec: input.segmentDurationSec ?? CAPTURE_CORE_DEFAULT_SEGMENT_SEC,
+  });
 }
 
 /** List AV devices and merge bindings into a profile copy (caller persists). */
@@ -98,4 +136,8 @@ export async function captureCoreReconcileProfile(
   return reconcileDeviceBindings(profile, inventory);
 }
 
-export { buildCaptureCoreRecordRequest, reconcileDeviceBindings };
+export {
+  buildCaptureCoreRecordRequest,
+  CAPTURE_CORE_DEFAULT_SEGMENT_SEC,
+  reconcileDeviceBindings,
+};
