@@ -6,35 +6,49 @@ import type {
 import {
   attachCandidateArchiveToExperimentNotes,
   auditPresenterTwinReadiness,
+  beginPhase4ExpertReview,
   beginBlindReviewSession,
   blindReviewRatingSheet,
   blankRatingSheetCsv,
   buildBlindEvaluationSchedule,
+  buildPhase4DecisionRecord,
+  candidatesEligibleForAcceptance,
   createPhase4GoNoGoDraft,
   createPresenterTwinExperiment,
   expertArtifactChecklist,
   evaluationDimensions,
+  finalizePhase4Decision,
   measureEvaluatorConsistency,
   mergePhase4RatingSheets,
   parseRatingSheet,
   parseRatingSheetCsv,
+  phase4ArtifactKinds,
   phase4BlindReviewSessionSchema,
   phase4CandidatesFromArchive,
   phase4CaptureChecklist,
+  phase4ExpertReviewSchema,
   proposePhase4Decision,
   publicBlindScheduleArtifact,
   ratingSheetToCsv,
   recordBlindReviewRating,
+  resolvePhase4HumanGates,
+  sealPhase4ExpertReview,
   phase4ProviderRequirementsSchema,
   sha256Hex,
   summarizeCoachedVsBaseline,
   validateRatingSheetForSchedule,
   verifyCandidateArchive,
+  verifyPhase4ExpertReview,
+  upsertPhase4ExpertCandidateReview,
   type BlindEvaluationSchedule,
   type DatasetVersionManifest,
   type EvaluationDimension,
+  type Phase4ArtifactAnnotation,
+  type Phase4ArtifactKind,
   type Phase4BlindReviewSession,
   type Phase4CandidateArchive,
+  type Phase4DecisionRecord,
+  type Phase4ExpertReview,
   type Phase4RatingSheet,
   type Phase4SourcePackage,
   type PresenterTwinExperiment,
@@ -116,6 +130,13 @@ function blindReviewKey(
   return `presenterTwinBlindReview:${experimentId}:${archiveManifestSha256}:${evaluatorId}`;
 }
 
+function expertReviewKey(
+  experimentId: string,
+  archiveManifestSha256: string,
+): string {
+  return `presenterTwinExpertReview:${experimentId}:${archiveManifestSha256}`;
+}
+
 const emptyBlindScores = (): Partial<Record<EvaluationDimension, number>> =>
   Object.fromEntries(evaluationDimensions.map((dimension) => [dimension, undefined]));
 
@@ -158,7 +179,29 @@ export function PresenterTwinPanel({
     useState("__unreviewed__");
   const [providerDisposition, setProviderDisposition] =
     useState("__unreviewed__");
-  const [expertReviewComplete, setExpertReviewComplete] = useState(false);
+  const [expertReview, setExpertReview] = useState<Phase4ExpertReview>();
+  const [expertReviewerId, setExpertReviewerId] = useState("");
+  const [expertCandidateId, setExpertCandidateId] = useState("");
+  const [expertDisposition, setExpertDisposition] = useState<
+    "acceptable" | "minor_edit" | "unusable"
+  >("acceptable");
+  const [expertCandidateNotes, setExpertCandidateNotes] = useState("");
+  const [expertAnnotations, setExpertAnnotations] = useState<
+    Phase4ArtifactAnnotation[]
+  >([]);
+  const [artifactKind, setArtifactKind] =
+    useState<Phase4ArtifactKind>("mouth_tearing");
+  const [artifactStartSec, setArtifactStartSec] = useState("0");
+  const [artifactEndSec, setArtifactEndSec] = useState("0");
+  const [artifactSeverity, setArtifactSeverity] = useState(3);
+  const [artifactNotes, setArtifactNotes] = useState("");
+  const expertVideoRef = useRef<HTMLVideoElement>(null);
+  const [decisionRecord, setDecisionRecord] = useState<Phase4DecisionRecord>();
+  const [finalDecision, setFinalDecision] = useState<
+    "go" | "no_go" | "inconclusive"
+  >("inconclusive");
+  const [finalDecisionRationale, setFinalDecisionRationale] = useState("");
+  const [finalDecisionReviewer, setFinalDecisionReviewer] = useState("");
   const [candidateMediaUrls, setCandidateMediaUrls] = useState<
     Record<string, string>
   >({});
@@ -198,7 +241,8 @@ export function PresenterTwinPanel({
             : undefined;
           if (!verifiedArchive?.archiveManifestSha256) return;
           setCandidateArchive(verifiedArchive);
-          const [ratings, schedule] = await Promise.all([
+          const [ratings, schedule, storedExpertReview, storedDecision] =
+            await Promise.all([
             store.settings.get<Phase4RatingSheet>(
               archiveBoundKey(
                 "presenterTwinRatings",
@@ -213,6 +257,15 @@ export function PresenterTwinPanel({
                 verifiedArchive.archiveManifestSha256,
               ),
             ),
+            store.settings.get<unknown>(
+              expertReviewKey(
+                lastExperiment.id,
+                verifiedArchive.archiveManifestSha256,
+              ),
+            ),
+            store.settings.get<Phase4DecisionRecord>(
+              `presenterTwinEvaluation:${lastExperiment.id}`,
+            ),
           ]);
           if (ratings && schedule) {
             setImportedRatings(
@@ -222,6 +275,35 @@ export function PresenterTwinPanel({
           if (schedule) {
             setBlindSchedule(schedule);
             setPrivateReveal(schedule.privateReveal);
+          }
+          if (storedExpertReview) {
+            const parsedReview =
+              phase4ExpertReviewSchema.parse(storedExpertReview);
+            const loadedReview =
+              parsedReview.status === "complete"
+                ? await verifyPhase4ExpertReview({
+                    review: parsedReview,
+                    archive: verifiedArchive,
+                  })
+                : parsedReview;
+            if (
+              loadedReview.experimentId !== lastExperiment.id ||
+              loadedReview.candidateArchiveManifestSha256 !==
+                verifiedArchive.archiveManifestSha256
+            ) {
+              throw new Error(
+                "Saved expert review does not match the candidate archive",
+              );
+            }
+            setExpertReview(loadedReview);
+            setExpertReviewerId(loadedReview.reviewerId);
+          }
+          if (
+            storedDecision?.experimentId === lastExperiment.id &&
+            storedDecision.candidateArchiveManifestSha256 ===
+              verifiedArchive.archiveManifestSha256
+          ) {
+            setDecisionRecord(storedDecision);
           }
         } catch (cause) {
           setMessage(
@@ -526,6 +608,11 @@ export function PresenterTwinPanel({
       setPrivateReveal([]);
       setImportedRatings(undefined);
       setAcceptableCandidate("__unreviewed__");
+      setExpertReview(undefined);
+      setExpertCandidateId("");
+      setExpertAnnotations([]);
+      setDecisionRecord(undefined);
+      setEvaluationSummary(undefined);
       Object.values(candidateMediaUrlsRef.current).forEach((url) =>
         URL.revokeObjectURL(url),
       );
@@ -763,7 +850,188 @@ export function PresenterTwinPanel({
     }
   };
 
+  const loadExpertCandidate = (
+    candidateId: string,
+    review = expertReview,
+  ) => {
+    setExpertCandidateId(candidateId);
+    const saved = review?.candidateReviews.find(
+      (entry) => entry.candidateId === candidateId,
+    );
+    setExpertDisposition(saved?.disposition ?? "acceptable");
+    setExpertCandidateNotes(saved?.notes ?? "");
+    setExpertAnnotations(saved?.annotations ?? []);
+    setArtifactStartSec("0");
+    setArtifactEndSec("0");
+    setArtifactNotes("");
+  };
+
+  const startExpertReview = async () => {
+    if (
+      !lastExperiment ||
+      !candidateArchive?.archiveManifestSha256 ||
+      !candidateArchive.entries.length
+    ) {
+      setMessage("Verify a candidate archive first.");
+      return;
+    }
+    if (
+      Object.keys(candidateMediaUrls).length !== candidateArchive.entries.length
+    ) {
+      setMessage("Attach and hash-verify every candidate video first.");
+      return;
+    }
+    if (expertReview) {
+      loadExpertCandidate(
+        expertCandidateId || candidateArchive.entries[0].candidateId,
+        expertReview,
+      );
+      return;
+    }
+    const reviewerId = expertReviewerId.trim();
+    if (!reviewerId) {
+      setMessage("Enter a stable expert reviewer ID.");
+      return;
+    }
+    try {
+      const review = beginPhase4ExpertReview({
+        experimentId: lastExperiment.id,
+        candidateArchiveManifestSha256:
+          candidateArchive.archiveManifestSha256,
+        reviewerId,
+      });
+      await store.settings.put(
+        expertReviewKey(
+          lastExperiment.id,
+          candidateArchive.archiveManifestSha256,
+        ),
+        review,
+      );
+      setExpertReview(review);
+      loadExpertCandidate(candidateArchive.entries[0].candidateId, review);
+      setMessage(
+        "Expert review started. Inspect each candidate unblinded and save its disposition and timestamped artifacts.",
+      );
+    } catch (cause) {
+      setMessage(cause instanceof Error ? cause.message : String(cause));
+    }
+  };
+
+  const addExpertAnnotation = () => {
+    if (!expertCandidateId || !candidateArchive) return;
+    const startSec = Number(artifactStartSec);
+    const endSec = Number(artifactEndSec);
+    const candidate = candidateArchive.entries.find(
+      (entry) => entry.candidateId === expertCandidateId,
+    );
+    if (
+      !candidate ||
+      !Number.isFinite(startSec) ||
+      !Number.isFinite(endSec) ||
+      startSec < 0 ||
+      endSec < startSec ||
+      endSec > candidate.durationSec
+    ) {
+      setMessage(
+        `Artifact range must be inside 0–${candidate?.durationSec.toFixed(2) ?? "0"}s.`,
+      );
+      return;
+    }
+    setExpertAnnotations((current) => [
+      ...current,
+      {
+        id: crypto.randomUUID(),
+        candidateId: expertCandidateId,
+        kind: artifactKind,
+        startSec,
+        endSec,
+        severity: artifactSeverity,
+        notes: artifactNotes.trim() || undefined,
+      },
+    ]);
+    setArtifactNotes("");
+    setMessage("Timestamped artifact added. Save the candidate review to persist it.");
+  };
+
+  const saveExpertCandidateReview = async () => {
+    if (
+      !expertReview ||
+      !lastExperiment ||
+      !candidateArchive?.archiveManifestSha256 ||
+      !expertCandidateId
+    ) {
+      setMessage("Start the expert review and choose a candidate first.");
+      return;
+    }
+    try {
+      const next = upsertPhase4ExpertCandidateReview({
+        review: expertReview,
+        candidateReview: {
+          candidateId: expertCandidateId,
+          reviewedAt: new Date().toISOString(),
+          disposition: expertDisposition,
+          annotations: expertAnnotations,
+          notes: expertCandidateNotes.trim() || undefined,
+        },
+      });
+      await store.settings.put(
+        expertReviewKey(
+          lastExperiment.id,
+          candidateArchive.archiveManifestSha256,
+        ),
+        next,
+      );
+      setExpertReview(next);
+      const nextCandidate = candidateArchive.entries.find(
+        (entry) =>
+          !next.candidateReviews.some(
+            (review) => review.candidateId === entry.candidateId,
+          ),
+      );
+      if (nextCandidate) loadExpertCandidate(nextCandidate.candidateId, next);
+      setMessage(
+        `Saved expert review ${next.candidateReviews.length}/${candidateArchive.entries.length}.`,
+      );
+    } catch (cause) {
+      setMessage(cause instanceof Error ? cause.message : String(cause));
+    }
+  };
+
+  const sealExpertReview = async () => {
+    if (!expertReview || !lastExperiment || !candidateArchive) return;
+    try {
+      const sealed = await sealPhase4ExpertReview({
+        review: expertReview,
+        archive: candidateArchive,
+      });
+      await store.settings.put(
+        expertReviewKey(
+          lastExperiment.id,
+          candidateArchive.archiveManifestSha256!,
+        ),
+        sealed,
+      );
+      setExpertReview(sealed);
+      downloadJson(`${lastExperiment.id}-expert-review.json`, sealed);
+      setMessage(
+        `Expert review sealed · ${sealed.reviewManifestSha256?.slice(0, 12)}…`,
+      );
+    } catch (cause) {
+      setMessage(cause instanceof Error ? cause.message : String(cause));
+    }
+  };
+
+  const expertReviewComplete =
+    expertReview?.status === "complete" &&
+    Boolean(expertReview.reviewManifestSha256);
+
   const computeEvaluation = async () => {
+    if (decisionRecord && decisionRecord.decision !== "pending") {
+      setMessage(
+        "The published Phase 4 decision is immutable. Start a new experiment to evaluate changed evidence.",
+      );
+      return;
+    }
     if (!lastExperiment) {
       setMessage("Create or load an experiment first.");
       return;
@@ -793,81 +1061,78 @@ export function PresenterTwinPanel({
       privateReveal,
     });
     const decided = summary.coachedWins + summary.baselineWins;
+    let gates;
+    try {
+      gates = resolvePhase4HumanGates({
+        acceptableCandidateSelection: acceptableCandidate,
+        providerDisposition,
+        expertReviewComplete,
+        expertReviewManifestSha256: expertReview?.reviewManifestSha256,
+        expertReview,
+        archive: candidateArchive,
+      });
+    } catch (cause) {
+      setMessage(cause instanceof Error ? cause.message : String(cause));
+      return;
+    }
     const proposal = proposePhase4Decision({
       coachedWinRate: summary.coachedWinRate,
       decidedComparisons: decided,
       consistency,
-      hasAcceptableCandidate:
-        acceptableCandidate === "__unreviewed__"
-          ? undefined
-          : acceptableCandidate !== "__none__",
-      providerAcceptable:
-        providerDisposition === "__unreviewed__"
-          ? undefined
-          : providerDisposition === "acceptable",
-      expertReviewComplete,
+      hasAcceptableCandidate: gates.hasAcceptableCandidate,
+      providerAcceptable: gates.providerAcceptable,
+      expertReviewComplete: gates.expertReviewComplete,
     });
-    const report = createPhase4GoNoGoDraft({
+    const resultArtifact = buildPhase4DecisionRecord({
       experiment: lastExperiment,
       coachedVsBaseline: summary,
-      suggestedDecision: proposal.suggested,
-      decisionRationale: proposal.rationale,
-      openRisks: [
-        ...(consistency.pairsCompared === 0
-          ? ["No repeated-candidate consistency pairs in ratings"]
-          : []),
-        ...(acceptableCandidate === "__unreviewed__"
-          ? ["Candidate usability has not been reviewed"]
-          : acceptableCandidate === "__none__"
-            ? ["No candidate is acceptable for the intended use case"]
-            : []),
-        ...(providerDisposition === "__unreviewed__"
-          ? ["Provider policy has not been accepted or rejected"]
-          : providerDisposition === "unacceptable"
-            ? ["Provider data-control or rights posture is unacceptable"]
-            : []),
-        ...(!expertReviewComplete
-          ? ["Expert frame-by-frame artifact review is incomplete"]
-          : []),
-        "Human must confirm the final published decision",
-      ],
+      proposal,
+      humanGateEvidence: gates.evidence,
+      consistency,
+      candidateArchiveManifestSha256: candidateArchive?.archiveManifestSha256,
     });
-    const humanGateEvidence = {
-      reviewedAt: new Date().toISOString(),
-      acceptableCandidateId:
-        acceptableCandidate.startsWith("__") ? null : acceptableCandidate,
-      candidateDisposition:
-        acceptableCandidate === "__unreviewed__"
-          ? "unreviewed"
-          : acceptableCandidate === "__none__"
-            ? "none_acceptable"
-            : "acceptable",
-      providerDisposition:
-        providerDisposition === "__unreviewed__"
-          ? "unreviewed"
-          : providerDisposition,
-      expertReviewComplete,
-    };
-    const resultArtifact = {
-      ...report,
-      softwareSuggestion: proposal,
-      evaluatorConsistency: consistency,
-      candidateArchiveManifestSha256:
-        candidateArchive?.archiveManifestSha256,
-      humanGateEvidence,
-    };
     await store.settings.put(
       `presenterTwinEvaluation:${lastExperiment.id}`,
       resultArtifact,
     );
+    setDecisionRecord(resultArtifact);
     downloadJson(
       `${lastExperiment.id}-go-no-go-from-ratings.json`,
       resultArtifact,
     );
     setEvaluationSummary(
-      `Coached wins ${summary.coachedWins} · baseline ${summary.baselineWins} · ties ${summary.ties} · win rate ${(summary.coachedWinRate * 100).toFixed(0)}% · suggestion ${proposal.suggested}`,
+      `Coached wins ${summary.coachedWins} · baseline ${summary.baselineWins} · ties ${summary.ties} · win rate ${(summary.coachedWinRate * 100).toFixed(0)}% · suggestion ${proposal.suggested} · decision ${resultArtifact.decision}`,
     );
     setMessage(proposal.rationale);
+  };
+
+  const publishFinalDecision = async () => {
+    if (!decisionRecord || !lastExperiment) {
+      setMessage("Score the ratings before publishing a final decision.");
+      return;
+    }
+    try {
+      const finalized = finalizePhase4Decision({
+        record: decisionRecord,
+        decision: finalDecision,
+        decisionRationale: finalDecisionRationale,
+        decidedBy: finalDecisionReviewer,
+      });
+      await store.settings.put(
+        `presenterTwinEvaluation:${lastExperiment.id}`,
+        finalized,
+      );
+      setDecisionRecord(finalized);
+      downloadJson(`${lastExperiment.id}-final-decision.json`, finalized);
+      setEvaluationSummary(
+        `${evaluationSummary ?? "Evaluation complete"} · final ${finalized.decision} by ${finalized.decidedBy}`,
+      );
+      setMessage(
+        `Final ${finalized.decision} decision published and downloaded.`,
+      );
+    } catch (cause) {
+      setMessage(cause instanceof Error ? cause.message : String(cause));
+    }
   };
 
   const currentBlindEntry =
@@ -876,6 +1141,12 @@ export function PresenterTwinPanel({
       : undefined;
   const currentBlindMediaUrl = currentBlindEntry
     ? candidateMediaUrls[currentBlindEntry.playbackAssetId]
+    : undefined;
+  const currentExpertCandidate = candidateArchive?.entries.find(
+    (entry) => entry.candidateId === expertCandidateId,
+  );
+  const currentExpertMediaUrl = currentExpertCandidate
+    ? candidateMediaUrls[currentExpertCandidate.playbackRelativePath]
     : undefined;
 
   return (
@@ -1251,6 +1522,280 @@ export function PresenterTwinPanel({
               Start or resume blind review
             </button>
           </div>
+          <h2>Unblinded expert artifact review</h2>
+          <p className="muted">
+            Run after blind ratings. Candidate identity is visible here so
+            exact artifacts and intended-use usability can be documented.
+          </p>
+          <div className="train-setup">
+            <label>
+              Expert reviewer ID
+              <input
+                value={expertReviewerId}
+                disabled={Boolean(expertReview)}
+                onChange={(event) => setExpertReviewerId(event.target.value)}
+                placeholder="expert-1"
+              />
+            </label>
+          </div>
+          <div className="button-row">
+            <button
+              type="button"
+              className="secondary"
+              disabled={
+                !candidateArchive ||
+                Object.keys(candidateMediaUrls).length !==
+                  candidateArchive.entries.length
+              }
+              onClick={() => void startExpertReview()}
+            >
+              {expertReview ? "Open expert review" : "Start expert review"}
+            </button>
+          </div>
+          {expertReview && candidateArchive && (
+            <div className="expert-review-workspace">
+              <div className="train-setup">
+                <label>
+                  Candidate
+                  <select
+                    value={expertCandidateId}
+                    disabled={expertReviewComplete}
+                    onChange={(event) =>
+                      loadExpertCandidate(event.target.value)
+                    }
+                  >
+                    {candidateArchive.entries.map((entry) => {
+                      const saved = expertReview.candidateReviews.find(
+                        (review) =>
+                          review.candidateId === entry.candidateId,
+                      );
+                      return (
+                        <option
+                          key={entry.candidateId}
+                          value={entry.candidateId}
+                        >
+                          {saved ? "✓ " : ""}
+                          {entry.candidateId} · {entry.condition}
+                        </option>
+                      );
+                    })}
+                  </select>
+                </label>
+              </div>
+              {currentExpertMediaUrl ? (
+                <video
+                  ref={expertVideoRef}
+                  key={expertCandidateId}
+                  className="blind-candidate-video"
+                  src={currentExpertMediaUrl}
+                  controls
+                  playsInline
+                  preload="metadata"
+                />
+              ) : (
+                <p className="notice warning">
+                  Select a candidate or reattach its verified media.
+                </p>
+              )}
+              {currentExpertCandidate && (
+                <p className="muted">
+                  {currentExpertCandidate.condition} ·{" "}
+                  {currentExpertCandidate.durationSec.toFixed(2)}s · provider{" "}
+                  {currentExpertCandidate.providerId ?? "real reference"}{" "}
+                  {currentExpertCandidate.providerVersion ?? ""}
+                </p>
+              )}
+              <div className="train-setup expert-annotation-grid">
+                <label>
+                  Artifact
+                  <select
+                    value={artifactKind}
+                    disabled={expertReviewComplete}
+                    onChange={(event) =>
+                      setArtifactKind(event.target.value as Phase4ArtifactKind)
+                    }
+                  >
+                    {phase4ArtifactKinds.map((kind) => (
+                      <option key={kind} value={kind}>
+                        {kind.replaceAll("_", " ")}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  Start (seconds)
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={artifactStartSec}
+                    disabled={expertReviewComplete}
+                    onChange={(event) =>
+                      setArtifactStartSec(event.target.value)
+                    }
+                  />
+                  <button
+                    type="button"
+                    className="secondary"
+                    disabled={!currentExpertMediaUrl || expertReviewComplete}
+                    onClick={() =>
+                      setArtifactStartSec(
+                        (expertVideoRef.current?.currentTime ?? 0).toFixed(2),
+                      )
+                    }
+                  >
+                    Set from player
+                  </button>
+                </label>
+                <label>
+                  End (seconds)
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={artifactEndSec}
+                    disabled={expertReviewComplete}
+                    onChange={(event) =>
+                      setArtifactEndSec(event.target.value)
+                    }
+                  />
+                  <button
+                    type="button"
+                    className="secondary"
+                    disabled={!currentExpertMediaUrl || expertReviewComplete}
+                    onClick={() =>
+                      setArtifactEndSec(
+                        (expertVideoRef.current?.currentTime ?? 0).toFixed(2),
+                      )
+                    }
+                  >
+                    Set from player
+                  </button>
+                </label>
+                <label>
+                  Severity (1–5)
+                  <select
+                    value={artifactSeverity}
+                    disabled={expertReviewComplete}
+                    onChange={(event) =>
+                      setArtifactSeverity(Number(event.target.value))
+                    }
+                  >
+                    {[1, 2, 3, 4, 5].map((severity) => (
+                      <option key={severity} value={severity}>
+                        {severity}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="expert-annotation-notes">
+                  Artifact notes
+                  <input
+                    value={artifactNotes}
+                    disabled={expertReviewComplete}
+                    onChange={(event) => setArtifactNotes(event.target.value)}
+                  />
+                </label>
+              </div>
+              <div className="button-row">
+                <button
+                  type="button"
+                  className="secondary"
+                  disabled={!expertCandidateId || expertReviewComplete}
+                  onClick={addExpertAnnotation}
+                >
+                  Add timestamped artifact
+                </button>
+              </div>
+              {expertAnnotations.length > 0 && (
+                <ol className="expert-annotation-list">
+                  {expertAnnotations.map((annotation) => (
+                    <li key={annotation.id}>
+                      <button
+                        type="button"
+                        className="secondary"
+                        disabled={expertReviewComplete}
+                        onClick={() =>
+                          setExpertAnnotations((current) =>
+                            current.filter(
+                              (entry) => entry.id !== annotation.id,
+                            ),
+                          )
+                        }
+                      >
+                        Remove
+                      </button>
+                      <strong>{annotation.kind.replaceAll("_", " ")}</strong>{" "}
+                      {annotation.startSec.toFixed(2)}–
+                      {annotation.endSec.toFixed(2)}s · severity{" "}
+                      {annotation.severity}
+                      {annotation.notes ? ` · ${annotation.notes}` : ""}
+                    </li>
+                  ))}
+                </ol>
+              )}
+              <div className="train-setup">
+                <label>
+                  Candidate disposition
+                  <select
+                    value={expertDisposition}
+                    disabled={expertReviewComplete}
+                    onChange={(event) =>
+                      setExpertDisposition(
+                        event.target.value as
+                          | "acceptable"
+                          | "minor_edit"
+                          | "unusable",
+                      )
+                    }
+                  >
+                    <option value="acceptable">Acceptable</option>
+                    <option value="minor_edit">Acceptable after minor edit</option>
+                    <option value="unusable">Unusable</option>
+                  </select>
+                </label>
+                <label>
+                  Candidate notes
+                  <textarea
+                    rows={3}
+                    value={expertCandidateNotes}
+                    disabled={expertReviewComplete}
+                    onChange={(event) =>
+                      setExpertCandidateNotes(event.target.value)
+                    }
+                  />
+                </label>
+              </div>
+              <div className="button-row">
+                <button
+                  type="button"
+                  className="secondary"
+                  disabled={!expertCandidateId || expertReviewComplete}
+                  onClick={() => void saveExpertCandidateReview()}
+                >
+                  Save candidate review
+                </button>
+                <button
+                  type="button"
+                  disabled={
+                    expertReviewComplete ||
+                    expertReview.candidateReviews.length !==
+                      candidateArchive.entries.length
+                  }
+                  onClick={() => void sealExpertReview()}
+                >
+                  Seal expert review
+                </button>
+              </div>
+              <p className={expertReviewComplete ? "ready" : "muted"}>
+                {expertReview.candidateReviews.length}/
+                {candidateArchive.entries.length} candidates reviewed ·{" "}
+                {expertReviewComplete
+                  ? `sealed ${expertReview.reviewManifestSha256?.slice(0, 12)}…`
+                  : "in progress"}
+              </p>
+            </div>
+          )}
           <h2>Human success gates</h2>
           <div className="train-setup">
             <label>
@@ -1264,12 +1809,18 @@ export function PresenterTwinPanel({
               >
                 <option value="__unreviewed__">Not reviewed</option>
                 <option value="__none__">No acceptable candidate</option>
-                {candidateArchive?.entries
-                  .filter(
-                    (entry) =>
-                      entry.durationSec >= 10 && entry.durationSec <= 60,
-                  )
-                  .map((entry) => (
+                {(candidateArchive
+                  ? candidatesEligibleForAcceptance(candidateArchive).filter(
+                      (entry) =>
+                        !expertReviewComplete ||
+                        expertReview.candidateReviews.some(
+                          (review) =>
+                            review.candidateId === entry.candidateId &&
+                            review.disposition !== "unusable",
+                        ),
+                    )
+                  : []
+                ).map((entry) => (
                     <option key={entry.candidateId} value={entry.candidateId}>
                       Acceptable: {entry.candidateId} ·{" "}
                       {entry.durationSec.toFixed(1)}s
@@ -1290,16 +1841,13 @@ export function PresenterTwinPanel({
                 <option value="unacceptable">Unacceptable</option>
               </select>
             </label>
-            <label className="feature-flag">
-              <input
-                type="checkbox"
-                checked={expertReviewComplete}
-                onChange={(event) =>
-                  setExpertReviewComplete(event.target.checked)
-                }
-              />
-              Expert frame-by-frame artifact review completed
-            </label>
+            <p className={expertReviewComplete ? "ready" : "blocked"}>
+              <strong>{expertReviewComplete ? "PASS" : "OPEN"}</strong>{" "}
+              Expert review{" "}
+              {expertReviewComplete
+                ? `sealed ${expertReview.reviewManifestSha256?.slice(0, 12)}…`
+                : "must be completed and sealed"}
+            </p>
           </div>
           <div className="button-row">
             <button
@@ -1309,13 +1857,90 @@ export function PresenterTwinPanel({
                 !lastExperiment ||
                 !importedRatings ||
                 !blindSchedule ||
-                !privateReveal.length
+                !privateReveal.length ||
+                (decisionRecord !== undefined &&
+                  decisionRecord.decision !== "pending")
               }
               onClick={() => void computeEvaluation()}
             >
               Score ratings → go/no-go suggestion
             </button>
           </div>
+          {decisionRecord && (
+            <>
+              <h2>Publish human decision</h2>
+              <div className="train-setup">
+                <label>
+                  Final decision
+                  <select
+                    value={finalDecision}
+                    disabled={decisionRecord.decision !== "pending"}
+                    onChange={(event) =>
+                      setFinalDecision(
+                        event.target.value as
+                          | "go"
+                          | "no_go"
+                          | "inconclusive",
+                      )
+                    }
+                  >
+                    <option value="inconclusive">Inconclusive</option>
+                    <option value="go">Go</option>
+                    <option value="no_go">No-go</option>
+                  </select>
+                </label>
+                <label>
+                  Decision reviewer ID
+                  <input
+                    value={
+                      decisionRecord.decidedBy ?? finalDecisionReviewer
+                    }
+                    disabled={decisionRecord.decision !== "pending"}
+                    onChange={(event) =>
+                      setFinalDecisionReviewer(event.target.value)
+                    }
+                    placeholder="decision-owner"
+                  />
+                </label>
+                <label>
+                  Human rationale
+                  <textarea
+                    rows={4}
+                    value={
+                      decisionRecord.decision === "pending"
+                        ? finalDecisionRationale
+                        : decisionRecord.decisionRationale
+                    }
+                    disabled={decisionRecord.decision !== "pending"}
+                    onChange={(event) =>
+                      setFinalDecisionRationale(event.target.value)
+                    }
+                  />
+                </label>
+              </div>
+              <div className="button-row">
+                <button
+                  type="button"
+                  disabled={decisionRecord.decision !== "pending"}
+                  onClick={() => void publishFinalDecision()}
+                >
+                  Publish final decision
+                </button>
+              </div>
+              <p
+                className={
+                  decisionRecord.decision === "pending" ? "muted" : "ready"
+                }
+              >
+                Software suggestion:{" "}
+                {decisionRecord.softwareSuggestion.suggested} · published
+                decision: {decisionRecord.decision}
+                {decisionRecord.decidedBy
+                  ? ` by ${decisionRecord.decidedBy}`
+                  : ""}
+              </p>
+            </>
+          )}
 
           <h2>Expert artifact checklist</h2>
           <ul className="readiness-list">

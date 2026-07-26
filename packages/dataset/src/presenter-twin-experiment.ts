@@ -268,7 +268,9 @@ function validateCondition(source: Phase4SourcePackage): void {
   switch (source.condition) {
     case "uncoached_baseline":
       if (source.coached || source.curated || source.realReference) {
-        throw new Error("Condition A must be uncoached, minimally curated, and generated");
+        throw new Error(
+          "Condition A must be uncoached, minimally curated, and not a real-video reference",
+        );
       }
       break;
     case "coached_continuous":
@@ -300,6 +302,12 @@ function validateCondition(source: Phase4SourcePackage): void {
     case "real_reference":
       if (!source.realReference || source.curated) {
         throw new Error("Condition D must be an ungenerated real-video reference");
+      }
+      // Generated substitutes cannot masquerade as the real ceiling.
+      if (source.voiceAssetId) {
+        throw new Error(
+          "Condition D is a real recording and must not carry a separate generated-condition voice asset",
+        );
       }
       break;
   }
@@ -556,12 +564,15 @@ export interface Phase4GoNoGoReport {
   providerId?: string;
   providerVersion?: string;
   blindScheduleSeed?: string;
+  experimentManifestSha256?: string;
+  candidateArchiveManifestSha256?: string;
   coachedVsBaseline?: {
     coachedWins: number;
     baselineWins: number;
     ties: number;
     coachedWinRate: number;
   };
+  /** Software may only suggest; final decision is human-set. */
   decision: "pending" | "go" | "no_go" | "inconclusive";
   decisionRationale: string;
   openRisks: string[];
@@ -580,8 +591,32 @@ export function createPhase4GoNoGoDraft(args: {
   /** Suggested by software; final published decision remains human-set. */
   suggestedDecision?: Phase4GoNoGoReport["decision"];
   decisionRationale?: string;
+  /**
+   * Non-go outcomes only. Publishing `go` is impossible from this draft
+   * constructor — even if `decision: "go"` is passed, the artifact stays
+   * `pending`. Use finalizePhase4Decision with complete human gates for go.
+   */
   decision?: Phase4GoNoGoReport["decision"];
+  candidateArchiveManifestSha256?: string;
 }): Phase4GoNoGoReport {
+  const requested = args.decision ?? "pending";
+  // Criterion 4: auto-go without gates is impossible. Drafts cannot publish go.
+  const decision: Phase4GoNoGoReport["decision"] =
+    requested === "go" ? "pending" : requested;
+  const openRisks = [
+    ...(args.openRisks ?? [
+      "No generation candidates produced yet",
+      "Blind ratings empty",
+      "Provider not selected or not run",
+    ]),
+  ];
+  if (requested === "go" && !openRisks.includes(
+    "Go requires finalizePhase4Decision with complete human gates",
+  )) {
+    openRisks.push(
+      "Go requires finalizePhase4Decision with complete human gates",
+    );
+  }
   return {
     format: "presenter-twin-go-no-go/1.0.0",
     experimentId: args.experiment.id,
@@ -591,18 +626,19 @@ export function createPhase4GoNoGoDraft(args: {
     conditions: [...presenterTwinConditions],
     providerId: args.experiment.provider.providerId || undefined,
     providerVersion: args.experiment.provider.providerVersion || undefined,
+    experimentManifestSha256: args.experiment.manifestSha256,
+    candidateArchiveManifestSha256: args.candidateArchiveManifestSha256,
     coachedVsBaseline: args.coachedVsBaseline,
-    decision: args.decision ?? "pending",
+    decision,
     decisionRationale:
-      args.decisionRationale ??
-      (args.suggestedDecision
-        ? `Software suggestion: ${args.suggestedDecision}. Human confirmation required.`
-        : "Empirical blind evaluation and human review not yet complete."),
-    openRisks: args.openRisks ?? [
-      "No generation candidates produced yet",
-      "Blind ratings empty",
-      "Provider not selected or not run",
-    ],
+      requested === "go"
+        ? args.decisionRationale ??
+          "Go cannot be published from createPhase4GoNoGoDraft; use finalizePhase4Decision with complete human gates."
+        : args.decisionRationale ??
+          (args.suggestedDecision
+            ? `Software suggestion: ${args.suggestedDecision}. Human confirmation required.`
+            : "Empirical blind evaluation and human review not yet complete."),
+    openRisks,
   };
 }
 

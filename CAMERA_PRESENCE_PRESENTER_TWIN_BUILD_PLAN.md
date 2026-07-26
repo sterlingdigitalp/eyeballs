@@ -2880,6 +2880,24 @@ The local blind-review vertical slice now also:
 - keeps media attachments ephemeral, local, and restart-scoped; persistent
   records contain hashes and ratings, not copied generated video.
 
+Software protocol completion (fixture-proven, not empirical hypothesis validation):
+
+- condition reject rules cover coached baseline, multi-clip “continuous,”
+  unversioned curated, and generated-as-real-reference substitutions;
+- decision records persist experiment/archive hashes, software suggestion,
+  evaluator consistency, human gate evidence, and open risks while keeping
+  `decision: pending` until human finalize;
+- the in-app unblinded expert workstation plays hash-verified local candidates,
+  records exact artifact in/out points, kind, severity, notes, and per-candidate
+  usability, resumes in-progress reviews, and seals complete coverage with a
+  content SHA-256;
+- `finalizePhase4Decision` refuses `go` unless an acceptable 10–60s generated
+  candidate, provider rights acceptance, and the sealed expert-review hash are
+  all recorded; final decisions additionally require reviewer identity,
+  timestamp, and non-empty rationale and are immutable after publication;
+- Twin proof UI binds exclusively to package helpers for readiness, checklist,
+  archive/rating import, score→suggestion, expert review, and decision export.
+
 ### 14.3 Experimental conditions
 
 Create at least four source conditions:

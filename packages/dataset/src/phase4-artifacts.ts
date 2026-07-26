@@ -10,11 +10,13 @@ import type {
 } from "../../contracts/src";
 import { sha256Hex } from "./sha256";
 import {
+  createPhase4GoNoGoDraft,
   evaluationDimensions,
   phase4SourcePackageSchema,
   presenterTwinConditions,
   type BlindEvaluationSchedule,
   type Phase4Candidate,
+  type Phase4GoNoGoReport,
   type Phase4SourcePackage,
   type PresenterTwinCondition,
   type PresenterTwinExperiment,
@@ -355,6 +357,232 @@ export function mergePhase4RatingSheets(
       .at(-1)!,
     ratings,
   });
+}
+
+export const phase4ArtifactKinds = [
+  "mouth_tearing",
+  "eye_flicker",
+  "gaze_drift",
+  "identity_drift",
+  "lip_sync_error",
+  "temporal_jitter",
+  "background_warping",
+  "uncanny_moment",
+] as const;
+export type Phase4ArtifactKind = (typeof phase4ArtifactKinds)[number];
+
+export const phase4ArtifactAnnotationSchema = z
+  .object({
+    id: z.string().min(1),
+    candidateId: z.string().min(1),
+    kind: z.enum(phase4ArtifactKinds),
+    startSec: z.number().nonnegative(),
+    endSec: z.number().nonnegative(),
+    severity: z.number().int().min(1).max(5),
+    notes: z.string().max(2000).optional(),
+  })
+  .refine((annotation) => annotation.endSec >= annotation.startSec, {
+    message: "artifact annotation end must not precede start",
+    path: ["endSec"],
+  });
+export type Phase4ArtifactAnnotation = z.infer<
+  typeof phase4ArtifactAnnotationSchema
+>;
+
+export const phase4ExpertCandidateReviewSchema = z.object({
+  candidateId: z.string().min(1),
+  reviewedAt: z.string().datetime({ offset: true }),
+  disposition: z.enum(["acceptable", "minor_edit", "unusable"]),
+  annotations: z.array(phase4ArtifactAnnotationSchema),
+  notes: z.string().max(4000).optional(),
+});
+export type Phase4ExpertCandidateReview = z.infer<
+  typeof phase4ExpertCandidateReviewSchema
+>;
+
+export const PHASE4_EXPERT_REVIEW_FORMAT =
+  "presenter-twin-expert-review/1.0.0" as const;
+export const phase4ExpertReviewSchema = z
+  .object({
+    format: z.literal(PHASE4_EXPERT_REVIEW_FORMAT),
+    experimentId: z.string().min(1),
+    candidateArchiveManifestSha256: z
+      .string()
+      .regex(/^[a-f0-9]{64}$/i),
+    reviewerId: z.string().min(1),
+    startedAt: z.string().datetime({ offset: true }),
+    updatedAt: z.string().datetime({ offset: true }),
+    completedAt: z.string().datetime({ offset: true }).optional(),
+    status: z.enum(["in_progress", "complete"]),
+    candidateReviews: z.array(phase4ExpertCandidateReviewSchema),
+    reviewManifestSha256: z.string().regex(/^[a-f0-9]{64}$/i).optional(),
+  })
+  .superRefine((review, context) => {
+    const ids = new Set<string>();
+    for (const [index, candidate] of review.candidateReviews.entries()) {
+      if (ids.has(candidate.candidateId)) {
+        context.addIssue({
+          code: "custom",
+          path: ["candidateReviews", index, "candidateId"],
+          message: "expert candidate reviews must be unique",
+        });
+      }
+      ids.add(candidate.candidateId);
+      for (const [annotationIndex, annotation] of candidate.annotations.entries()) {
+        if (annotation.candidateId !== candidate.candidateId) {
+          context.addIssue({
+            code: "custom",
+            path: [
+              "candidateReviews",
+              index,
+              "annotations",
+              annotationIndex,
+              "candidateId",
+            ],
+            message: "artifact annotation candidate must match its review",
+          });
+        }
+      }
+    }
+    if (
+      review.status === "complete" &&
+      (!review.completedAt || !review.reviewManifestSha256)
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["status"],
+        message: "completed expert review requires completion time and SHA-256",
+      });
+    }
+  });
+export type Phase4ExpertReview = z.infer<typeof phase4ExpertReviewSchema>;
+
+export function beginPhase4ExpertReview(args: {
+  experimentId: string;
+  candidateArchiveManifestSha256: string;
+  reviewerId: string;
+  startedAt?: string;
+}): Phase4ExpertReview {
+  const startedAt = args.startedAt ?? new Date().toISOString();
+  return phase4ExpertReviewSchema.parse({
+    format: PHASE4_EXPERT_REVIEW_FORMAT,
+    experimentId: args.experimentId,
+    candidateArchiveManifestSha256:
+      args.candidateArchiveManifestSha256,
+    reviewerId: args.reviewerId.trim(),
+    startedAt,
+    updatedAt: startedAt,
+    status: "in_progress",
+    candidateReviews: [],
+  });
+}
+
+export function upsertPhase4ExpertCandidateReview(args: {
+  review: Phase4ExpertReview;
+  candidateReview: Phase4ExpertCandidateReview;
+}): Phase4ExpertReview {
+  const review = phase4ExpertReviewSchema.parse(args.review);
+  if (review.status === "complete") {
+    throw new Error("Completed expert review is immutable");
+  }
+  const candidateReview = phase4ExpertCandidateReviewSchema.parse(
+    args.candidateReview,
+  );
+  return phase4ExpertReviewSchema.parse({
+    ...review,
+    updatedAt: candidateReview.reviewedAt,
+    candidateReviews: [
+      ...review.candidateReviews.filter(
+        (entry) => entry.candidateId !== candidateReview.candidateId,
+      ),
+      candidateReview,
+    ],
+  });
+}
+
+function assertExpertReviewCoverage(
+  review: Phase4ExpertReview,
+  archive: Phase4CandidateArchive,
+): void {
+  if (
+    review.experimentId !== archive.experimentId ||
+    review.candidateArchiveManifestSha256 !== archive.archiveManifestSha256
+  ) {
+    throw new Error("Expert review does not match the candidate archive");
+  }
+  const byCandidate = new Map(
+    review.candidateReviews.map((entry) => [entry.candidateId, entry]),
+  );
+  for (const candidate of archive.entries) {
+    const candidateReview = byCandidate.get(candidate.candidateId);
+    if (!candidateReview) {
+      throw new Error(
+        `Expert review is missing candidate ${candidate.candidateId}`,
+      );
+    }
+    for (const annotation of candidateReview.annotations) {
+      if (annotation.endSec > candidate.durationSec) {
+        throw new Error(
+          `Artifact annotation exceeds ${candidate.candidateId} duration`,
+        );
+      }
+    }
+  }
+  if (byCandidate.size !== archive.entries.length) {
+    throw new Error("Expert review contains candidates outside the archive");
+  }
+}
+
+function expertReviewHashBody(
+  review: Omit<Phase4ExpertReview, "reviewManifestSha256">,
+): Uint8Array {
+  return new TextEncoder().encode(stableStringify(review));
+}
+
+export async function sealPhase4ExpertReview(args: {
+  review: Phase4ExpertReview;
+  archive: Phase4CandidateArchive;
+  completedAt?: string;
+}): Promise<Phase4ExpertReview> {
+  const review = phase4ExpertReviewSchema.parse(args.review);
+  const archive = phase4CandidateArchiveSchema.parse(args.archive);
+  assertExpertReviewCoverage(review, archive);
+  const completedAt = args.completedAt ?? new Date().toISOString();
+  const body = {
+    ...review,
+    updatedAt: completedAt,
+    completedAt,
+    status: "complete" as const,
+    reviewManifestSha256: undefined,
+  };
+  delete body.reviewManifestSha256;
+  const reviewManifestSha256 = await sha256Hex(expertReviewHashBody(body));
+  return phase4ExpertReviewSchema.parse({
+    ...body,
+    reviewManifestSha256,
+  });
+}
+
+export async function verifyPhase4ExpertReview(args: {
+  review: unknown;
+  archive: Phase4CandidateArchive;
+}): Promise<Phase4ExpertReview> {
+  const review = phase4ExpertReviewSchema.parse(args.review);
+  if (
+    review.status !== "complete" ||
+    !review.reviewManifestSha256 ||
+    !review.completedAt
+  ) {
+    throw new Error("Expert review is not sealed complete");
+  }
+  const archive = phase4CandidateArchiveSchema.parse(args.archive);
+  assertExpertReviewCoverage(review, archive);
+  const { reviewManifestSha256, ...body } = review;
+  const calculated = await sha256Hex(expertReviewHashBody(body));
+  if (calculated !== reviewManifestSha256) {
+    throw new Error("Expert review SHA-256 does not match");
+  }
+  return review;
 }
 
 export function emptyRatingSheet(args: {
@@ -845,6 +1073,7 @@ export function expertArtifactChecklist(): Array<{
 /**
  * Propose a go/no-go from blind summary + optional consistency.
  * Human must still set final decision; this only suggests.
+ * Auto-go is impossible: `suggested: "go"` requires all three human gates.
  */
 export function proposePhase4Decision(args: {
   coachedWinRate: number;
@@ -915,5 +1144,383 @@ export function proposePhase4Decision(args: {
     suggested: "inconclusive",
     rationale:
       "Results are mixed or sample size is small; expand ratings or test a second provider.",
+  };
+}
+
+/** §14.9: at least one 10–60 second generated candidate for intended use. */
+export const ACCEPTABLE_CANDIDATE_DURATION_SEC = {
+  min: 10,
+  max: 60,
+} as const;
+
+export function isAcceptableUseCaseDuration(durationSec: number): boolean {
+  return (
+    Number.isFinite(durationSec) &&
+    durationSec >= ACCEPTABLE_CANDIDATE_DURATION_SEC.min &&
+    durationSec <= ACCEPTABLE_CANDIDATE_DURATION_SEC.max
+  );
+}
+
+/**
+ * §14.9 success gate: at least one 10–60s *generated* candidate is acceptable.
+ * The real-video reference is a quality ceiling only — never an "acceptable
+ * generated candidate" for go.
+ */
+export function candidatesEligibleForAcceptance(
+  archive: Phase4CandidateArchive,
+): Phase4CandidateArchiveEntry[] {
+  return phase4CandidateArchiveSchema
+    .parse(archive)
+    .entries.filter(
+      (entry) =>
+        entry.condition !== "real_reference" &&
+        isAcceptableUseCaseDuration(entry.durationSec),
+    );
+}
+
+export function isGeneratedAcceptableCandidateCondition(
+  condition: PresenterTwinCondition | undefined,
+): boolean {
+  return (
+    condition === "uncoached_baseline" ||
+    condition === "coached_continuous" ||
+    condition === "curated_diverse"
+  );
+}
+
+export type Phase4CandidateDisposition =
+  | "unreviewed"
+  | "none_acceptable"
+  | "acceptable";
+export type Phase4ProviderDisposition =
+  | "unreviewed"
+  | "acceptable"
+  | "unacceptable";
+
+export interface Phase4HumanGateEvidence {
+  reviewedAt: string;
+  acceptableCandidateId: string | null;
+  candidateDisposition: Phase4CandidateDisposition;
+  providerDisposition: Phase4ProviderDisposition;
+  expertReviewComplete: boolean;
+  /** Content hash of the sealed expert review supporting this gate. */
+  expertReviewManifestSha256?: string;
+  /** Required (with 10–60s range) when candidateDisposition is acceptable. */
+  acceptableCandidateDurationSec?: number;
+  /** Generated condition only; real_reference is never acceptable for go. */
+  acceptableCandidateCondition?: PresenterTwinCondition;
+}
+
+/**
+ * Resolve UI/human gate inputs into proposePhase4Decision flags + evidence.
+ * Selecting an acceptable candidate requires it exists in the archive at 10–60s.
+ */
+export function resolvePhase4HumanGates(args: {
+  /** Candidate id, or sentinel unreviewed/none markers used by the Twin UI. */
+  acceptableCandidateSelection: string;
+  providerDisposition: string;
+  expertReviewComplete: boolean;
+  expertReviewManifestSha256?: string;
+  expertReview?: Phase4ExpertReview;
+  archive?: Phase4CandidateArchive;
+  reviewedAt?: string;
+}): {
+  hasAcceptableCandidate: boolean | undefined;
+  providerAcceptable: boolean | undefined;
+  expertReviewComplete: boolean;
+  evidence: Phase4HumanGateEvidence;
+} {
+  const reviewedAt = args.reviewedAt ?? new Date().toISOString();
+  const selection = args.acceptableCandidateSelection;
+  const expertReviewManifestSha256 = args.expertReviewManifestSha256;
+  const expertReviewComplete =
+    args.expertReviewComplete &&
+    /^[a-f0-9]{64}$/i.test(expertReviewManifestSha256 ?? "");
+  if (args.expertReview) {
+    const review = phase4ExpertReviewSchema.parse(args.expertReview);
+    if (
+      review.status !== "complete" ||
+      review.reviewManifestSha256 !== expertReviewManifestSha256
+    ) {
+      throw new Error(
+        "Human gates require the matching sealed expert review artifact",
+      );
+    }
+    if (
+      args.archive &&
+      (review.experimentId !== args.archive.experimentId ||
+        review.candidateArchiveManifestSha256 !==
+          args.archive.archiveManifestSha256)
+    ) {
+      throw new Error("Expert review does not match the candidate archive");
+    }
+  }
+  let candidateDisposition: Phase4CandidateDisposition;
+  let hasAcceptableCandidate: boolean | undefined;
+  let acceptableCandidateId: string | null = null;
+  let acceptableCandidateDurationSec: number | undefined;
+
+  let acceptableCandidateCondition: PresenterTwinCondition | undefined;
+
+  if (selection === "__unreviewed__" || selection === "") {
+    candidateDisposition = "unreviewed";
+    hasAcceptableCandidate = undefined;
+  } else if (selection === "__none__") {
+    candidateDisposition = "none_acceptable";
+    hasAcceptableCandidate = false;
+  } else {
+    const archive = args.archive
+      ? phase4CandidateArchiveSchema.parse(args.archive)
+      : undefined;
+    const entry = archive?.entries.find(
+      (candidate) => candidate.candidateId === selection,
+    );
+    if (!entry) {
+      throw new Error(
+        `Acceptable candidate ${selection} is not present in the candidate archive`,
+      );
+    }
+    if (entry.condition === "real_reference") {
+      throw new Error(
+        "Acceptable candidate for go must be a generated condition, not the real-video reference",
+      );
+    }
+    if (!isAcceptableUseCaseDuration(entry.durationSec)) {
+      throw new Error(
+        `Acceptable candidate must be ${ACCEPTABLE_CANDIDATE_DURATION_SEC.min}–${ACCEPTABLE_CANDIDATE_DURATION_SEC.max}s (got ${entry.durationSec}s)`,
+      );
+    }
+    candidateDisposition = "acceptable";
+    hasAcceptableCandidate = true;
+    acceptableCandidateId = entry.candidateId;
+    acceptableCandidateDurationSec = entry.durationSec;
+    acceptableCandidateCondition = entry.condition;
+    const expertCandidateReview = args.expertReview?.candidateReviews.find(
+      (review) => review.candidateId === entry.candidateId,
+    );
+    if (expertCandidateReview?.disposition === "unusable") {
+      throw new Error(
+        "Candidate marked unusable by expert review cannot satisfy the intended-use gate",
+      );
+    }
+  }
+
+  let providerDisposition: Phase4ProviderDisposition;
+  let providerAcceptable: boolean | undefined;
+  if (
+    args.providerDisposition === "acceptable" ||
+    args.providerDisposition === "unacceptable"
+  ) {
+    providerDisposition = args.providerDisposition;
+    providerAcceptable = args.providerDisposition === "acceptable";
+  } else if (
+    args.providerDisposition === "__unreviewed__" ||
+    args.providerDisposition === ""
+  ) {
+    providerDisposition = "unreviewed";
+    providerAcceptable = undefined;
+  } else {
+    throw new Error(
+      `Unknown provider disposition ${args.providerDisposition}`,
+    );
+  }
+
+  return {
+    hasAcceptableCandidate,
+    providerAcceptable,
+    expertReviewComplete,
+    evidence: {
+      reviewedAt,
+      acceptableCandidateId,
+      candidateDisposition,
+      providerDisposition,
+      expertReviewComplete,
+      expertReviewManifestSha256,
+      acceptableCandidateDurationSec,
+      acceptableCandidateCondition,
+    },
+  };
+}
+
+export interface Phase4DecisionRecord extends Phase4GoNoGoReport {
+  softwareSuggestion: {
+    suggested: "go" | "no_go" | "inconclusive" | "pending";
+    rationale: string;
+  };
+  evaluatorConsistency?: EvaluatorConsistencyReport;
+  experimentManifestSha256: string;
+  humanGateEvidence: Phase4HumanGateEvidence;
+  decidedBy?: string;
+  decidedAt?: string;
+}
+
+/**
+ * Assemble the publishable evaluation record. Decision stays `pending` —
+ * software never auto-publishes go. Use finalizePhase4Decision for the human
+ * final decision after gates are complete.
+ */
+export function buildPhase4DecisionRecord(args: {
+  experiment: PresenterTwinExperiment;
+  coachedVsBaseline: NonNullable<Phase4GoNoGoReport["coachedVsBaseline"]>;
+  proposal: {
+    suggested: "go" | "no_go" | "inconclusive" | "pending";
+    rationale: string;
+  };
+  humanGateEvidence: Phase4HumanGateEvidence;
+  consistency?: EvaluatorConsistencyReport;
+  candidateArchiveManifestSha256?: string;
+  openRisks?: string[];
+  createdAt?: string;
+}): Phase4DecisionRecord {
+  const openRisks =
+    args.openRisks ??
+    defaultOpenRisksFromGates({
+      evidence: args.humanGateEvidence,
+      consistency: args.consistency,
+    });
+  const draft = createPhase4GoNoGoDraft({
+    experiment: args.experiment,
+    createdAt: args.createdAt,
+    coachedVsBaseline: args.coachedVsBaseline,
+    suggestedDecision: args.proposal.suggested,
+    decisionRationale: args.proposal.rationale,
+    candidateArchiveManifestSha256: args.candidateArchiveManifestSha256,
+    openRisks,
+    // Explicit: never copy suggestion into decision.
+    decision: "pending",
+  });
+  return {
+    ...draft,
+    decision: "pending",
+    experimentManifestSha256: args.experiment.manifestSha256,
+    candidateArchiveManifestSha256: args.candidateArchiveManifestSha256,
+    softwareSuggestion: args.proposal,
+    evaluatorConsistency: args.consistency,
+    humanGateEvidence: args.humanGateEvidence,
+  };
+}
+
+function defaultOpenRisksFromGates(args: {
+  evidence: Phase4HumanGateEvidence;
+  consistency?: EvaluatorConsistencyReport;
+}): string[] {
+  const risks: string[] = [];
+  if (!args.consistency || args.consistency.pairsCompared === 0) {
+    risks.push("No repeated-candidate consistency pairs in ratings");
+  }
+  if (args.evidence.candidateDisposition === "unreviewed") {
+    risks.push("Candidate usability has not been reviewed");
+  } else if (args.evidence.candidateDisposition === "none_acceptable") {
+    risks.push("No candidate is acceptable for the intended use case");
+  }
+  if (args.evidence.providerDisposition === "unreviewed") {
+    risks.push("Provider policy has not been accepted or rejected");
+  } else if (args.evidence.providerDisposition === "unacceptable") {
+    risks.push("Provider data-control or rights posture is unacceptable");
+  }
+  if (!args.evidence.expertReviewComplete) {
+    risks.push("Expert frame-by-frame artifact review is incomplete");
+  } else if (
+    !/^[a-f0-9]{64}$/i.test(
+      args.evidence.expertReviewManifestSha256 ?? "",
+    )
+  ) {
+    risks.push("Expert artifact review is not backed by a sealed SHA-256");
+  }
+  risks.push("Human must confirm the final published decision");
+  return risks;
+}
+
+/**
+ * Assert complete favorable human gates for publishing go. Shared by finalize
+ * so crafted incomplete evidence cannot slip through disposition-only checks.
+ */
+export function assertCompleteGoHumanGates(
+  gates: Phase4HumanGateEvidence,
+): void {
+  if (gates.candidateDisposition !== "acceptable") {
+    throw new Error(
+      "Cannot finalize go without an acceptable 10–60s candidate",
+    );
+  }
+  if (!gates.acceptableCandidateId) {
+    throw new Error(
+      "Cannot finalize go without a recorded acceptable candidate id",
+    );
+  }
+  if (
+    gates.acceptableCandidateDurationSec === undefined ||
+    !isAcceptableUseCaseDuration(gates.acceptableCandidateDurationSec)
+  ) {
+    throw new Error(
+      "Cannot finalize go without a recorded acceptable candidate duration in the 10–60s window",
+    );
+  }
+  if (
+    !isGeneratedAcceptableCandidateCondition(
+      gates.acceptableCandidateCondition,
+    )
+  ) {
+    throw new Error(
+      "Cannot finalize go without a generated (non-real-reference) acceptable candidate",
+    );
+  }
+  if (gates.providerDisposition !== "acceptable") {
+    throw new Error(
+      "Cannot finalize go without acceptable provider data-control/rights",
+    );
+  }
+  if (!gates.expertReviewComplete) {
+    throw new Error(
+      "Cannot finalize go without completed expert artifact review",
+    );
+  }
+  if (!/^[a-f0-9]{64}$/i.test(gates.expertReviewManifestSha256 ?? "")) {
+    throw new Error(
+      "Cannot finalize go without a sealed expert review SHA-256",
+    );
+  }
+}
+
+/**
+ * Human-only finalization. Publishing `go` requires favorable completed gates
+ * (acceptable 10–60s *generated* candidate id+duration, provider acceptable,
+ * expert review). Software suggestion alone can never force `go`. Incomplete
+ * evidence with disposition="acceptable" but missing id/duration is rejected.
+ */
+export function finalizePhase4Decision(args: {
+  record: Phase4DecisionRecord;
+  decision: "go" | "no_go" | "inconclusive";
+  decisionRationale: string;
+  decidedBy: string;
+  decidedAt?: string;
+}): Phase4DecisionRecord {
+  const record = args.record;
+  if (record.decision !== "pending") {
+    throw new Error("Finalized Phase 4 decision is immutable");
+  }
+  const decisionRationale = args.decisionRationale.trim();
+  if (!decisionRationale) {
+    throw new Error("Final decision requires a rationale");
+  }
+  const decidedBy = args.decidedBy.trim();
+  if (!decidedBy) {
+    throw new Error("Final decision requires a reviewer identity");
+  }
+  if (args.decision === "go") {
+    assertCompleteGoHumanGates(record.humanGateEvidence);
+  }
+  return {
+    ...record,
+    decision: args.decision,
+    decisionRationale,
+    decidedBy,
+    decidedAt: args.decidedAt ?? new Date().toISOString(),
+    openRisks:
+      args.decision === "go"
+        ? record.openRisks.filter(
+            (risk) => risk !== "Human must confirm the final published decision",
+          )
+        : record.openRisks,
   };
 }

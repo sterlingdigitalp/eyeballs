@@ -175,6 +175,62 @@ describe("Phase 4 presenter-twin experiment", () => {
     ).rejects.toThrow(/separate real voice/);
   });
 
+  it("rejects coached baseline, multi-clip continuous, unversioned curated, and generated real reference", async () => {
+    const coachedBaseline = sources();
+    coachedBaseline[0] = { ...coachedBaseline[0], coached: true };
+    await expect(
+      createPresenterTwinExperiment({
+        id: "coached-a",
+        createdAt,
+        sourcePackages: coachedBaseline,
+        provider,
+      }),
+    ).rejects.toThrow(/Condition A/);
+
+    const multiClipContinuous = sources();
+    multiClipContinuous[1] = {
+      ...multiClipContinuous[1],
+      clipIds: ["clip-b1", "clip-b2"],
+    };
+    await expect(
+      createPresenterTwinExperiment({
+        id: "multi-b",
+        createdAt,
+        sourcePackages: multiClipContinuous,
+        provider,
+      }),
+    ).rejects.toThrow(/Condition B/);
+
+    const unversionedCurated = sources();
+    unversionedCurated[2] = {
+      ...unversionedCurated[2],
+      datasetVersionId: undefined,
+      datasetManifestSha256: undefined,
+    };
+    await expect(
+      createPresenterTwinExperiment({
+        id: "unversioned-c",
+        createdAt,
+        sourcePackages: unversionedCurated,
+        provider,
+      }),
+    ).rejects.toThrow(/Condition C|immutable dataset version/);
+
+    const generatedAsReal = sources();
+    generatedAsReal[3] = {
+      ...generatedAsReal[3],
+      voiceAssetId: "real-voice-asset",
+    };
+    await expect(
+      createPresenterTwinExperiment({
+        id: "generated-d",
+        createdAt,
+        sourcePackages: generatedAsReal,
+        provider,
+      }),
+    ).rejects.toThrow(/Condition D|real recording/);
+  });
+
   it("builds a deterministic blind schedule without public condition/provider labels", () => {
     const candidates = sources().map((source) => ({
       id: `candidate-${source.condition}`,
@@ -257,11 +313,22 @@ describe("Phase 4 presenter-twin experiment", () => {
       sourcePackages: sources(),
       provider,
     });
-    const draft = createPhase4GoNoGoDraft({ experiment });
+    const draft = createPhase4GoNoGoDraft({
+      experiment,
+      suggestedDecision: "go",
+    });
     expect(draft.format).toBe("presenter-twin-go-no-go/1.0.0");
     expect(draft.decision).toBe("pending");
+    expect(draft.experimentManifestSha256).toBe(experiment.manifestSha256);
+    expect(draft.decisionRationale).toMatch(/Human confirmation required/);
     expect(draft.experimentId).toBe("exp-go");
     expect(draft.openRisks.length).toBeGreaterThan(0);
+    // Even an explicit decision: "go" is clamped to pending (no auto-go).
+    const forced = createPhase4GoNoGoDraft({
+      experiment,
+      decision: "go",
+    });
+    expect(forced.decision).toBe("pending");
 
     const schedule = buildBlindEvaluationSchedule({
       experimentId: experiment.id,
