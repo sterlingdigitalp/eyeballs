@@ -49,11 +49,25 @@ Request: 3840×2160@30 + audio 48 kHz mono (not dry-run).
 | SHA-256 video | `e85ca44cf2a017e699964561589e5c349be8628808c39795792759ce329316ec` |
 | SHA-256 audio | `e9dd7bf1c6179190735e8ca786f9124ce73700a80d70faac90dc8a9c42bf04a5` |
 
+### Human Terminal proof — kill recovery (PASS) — same day
+
+Session: `/tmp/capture-core-stage0-kill` · 1080p request · stdin held open via `0< <(sleep 30)` · **`kill -9` after ~5s**
+
+| Check | Result |
+|---|---|
+| Process still alive at kill | Pass (`sent SIGKILL`) |
+| No clean finalize | Pass — events stop mid-`health` (51 video frames, 193 audio buffers) |
+| `recording-finished.json` | **MISSING** (honest incomplete) |
+| Partial masters preserved | `seg_000_video.mov` (~4.0 MB), `seg_000_audio.caf` (~91 KB) |
+| No auto-restart | Pass |
+
+Note: first kill attempt failed methodology (background job closed stdin → EOF treated as `stop`). Real kill requires stdin held open.
+
 **Follow-ups (not blockers for coding ahead):**
 
-1. Requested 30 fps; container reports ~**24 fps** — confirm active format / writer timescale.  
+1. Requested 30 fps; dual take container reports ~**24 fps** — confirm active format / writer timescale.  
 2. Audio is **AAC in CAF**, not raw PCM — charter prefers PCM for masters; change after vertical slice.  
-3. Process-kill recovery take still optional.  
+3. Abrupt-kill files are **not playable** yet (`moov atom not found` on video; CAF incomplete). Bytes retained on disk; **recoverable decode** still needs short finalized segments or a kill-safe writer.  
 4. 1h soak remains Stage 6 hardening.
 
 ### Commands used
@@ -112,8 +126,8 @@ Expect: `state starting → recording → segment_finalized → recording_finish
 
 ## Next (Stage 2–4)
 
-1. ~~Human dual short take~~ **Done** (see above). Optional: kill-recovery take.  
+1. ~~Human dual short take~~ **Done**. ~~Kill recovery~~ **Done** (partial files, no finish marker).  
 2. Live Dataset record in Tauri (release webview camera → real record, not only dry-run).  
-3. Harden: force 30 fps format if available; PCM audio masters; segment rotation under load.  
+3. Harden: force 30 fps format if available; PCM audio masters; kill-safe segment finalization / rotation.  
 4. Package capture-core as Tauri externalBin sidecar for release builds.  
 5. Later: 1h soak + failure matrix before ADR-004 → Accepted.
