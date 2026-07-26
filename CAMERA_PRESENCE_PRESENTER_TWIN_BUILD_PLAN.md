@@ -2863,6 +2863,23 @@ Phase 4 evaluation hardening added after the first artifact workflow:
 - evaluation artifacts persist the candidate archive hash, human gate evidence,
   evaluator consistency, and open risks alongside the statistical suggestion.
 
+The local blind-review vertical slice now also:
+
+- accepts evaluator-selected candidate videos without granting broad filesystem
+  access and verifies each file against the candidate archive SHA-256 before
+  playback;
+- opens a full-screen review surface containing only blind ID, video, rubric,
+  and progress—never condition, provider, source filename, or repeat status;
+- uses a consistent higher-is-better 1–5 direction, including explicitly
+  presenting artifact burden as artifact freedom/cleanliness;
+- autosaves each completed candidate rating in strict randomized order and can
+  resume an incomplete evaluator session after leaving the review surface;
+- exports completed evaluator JSON/CSV without reveal metadata and merges
+  multiple evaluator sheets while rejecting duplicate evaluator/candidate
+  pairs;
+- keeps media attachments ephemeral, local, and restart-scoped; persistent
+  records contain hashes and ratings, not copied generated video.
+
 ### 14.3 Experimental conditions
 
 Create at least four source conditions:

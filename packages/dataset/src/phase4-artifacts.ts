@@ -25,6 +25,8 @@ export const PHASE4_CANDIDATE_ARCHIVE_FORMAT =
   "presenter-twin-candidate-archive/1.0.0" as const;
 export const PHASE4_RATING_SHEET_FORMAT =
   "presenter-twin-rating-sheet/1.0.0" as const;
+export const PHASE4_BLIND_REVIEW_FORMAT =
+  "presenter-twin-blind-review/1.0.0" as const;
 
 export const phase4CandidateArchiveEntrySchema = z.object({
   candidateId: z.string().min(1),
@@ -189,6 +191,171 @@ export const phase4RatingSheetSchema = z.object({
   ratings: z.array(phase4RatingSheetEntrySchema),
 });
 export type Phase4RatingSheet = z.infer<typeof phase4RatingSheetSchema>;
+
+export const phase4BlindReviewSessionSchema = z
+  .object({
+    format: z.literal(PHASE4_BLIND_REVIEW_FORMAT),
+    id: z.string().min(1),
+    experimentId: z.string().min(1),
+    candidateArchiveManifestSha256: z
+      .string()
+      .regex(/^[a-f0-9]{64}$/i),
+    evaluatorId: z.string().min(1),
+    startedAt: z.string().datetime({ offset: true }),
+    updatedAt: z.string().datetime({ offset: true }),
+    status: z.enum(["in_progress", "complete"]),
+    blindIds: z.array(z.string().min(1)).min(4),
+    currentIndex: z.number().int().nonnegative(),
+    ratings: z.array(phase4RatingSheetEntrySchema),
+  })
+  .superRefine((session, context) => {
+    if (new Set(session.blindIds).size !== session.blindIds.length) {
+      context.addIssue({
+        code: "custom",
+        path: ["blindIds"],
+        message: "blind review IDs must be unique",
+      });
+    }
+    if (session.currentIndex > session.blindIds.length) {
+      context.addIssue({
+        code: "custom",
+        path: ["currentIndex"],
+        message: "blind review index exceeds schedule",
+      });
+    }
+    if (session.ratings.length !== session.currentIndex) {
+      context.addIssue({
+        code: "custom",
+        path: ["ratings"],
+        message: "blind review ratings must match completed index",
+      });
+    }
+    for (const [index, rating] of session.ratings.entries()) {
+      if (
+        rating.evaluatorId !== session.evaluatorId ||
+        rating.blindId !== session.blindIds[index]
+      ) {
+        context.addIssue({
+          code: "custom",
+          path: ["ratings", index],
+          message: "blind review ratings must follow the hidden schedule",
+        });
+      }
+    }
+    const expectedStatus =
+      session.currentIndex === session.blindIds.length
+        ? "complete"
+        : "in_progress";
+    if (session.status !== expectedStatus) {
+      context.addIssue({
+        code: "custom",
+        path: ["status"],
+        message: `blind review status must be ${expectedStatus}`,
+      });
+    }
+  });
+export type Phase4BlindReviewSession = z.infer<
+  typeof phase4BlindReviewSessionSchema
+>;
+
+export function beginBlindReviewSession(args: {
+  experimentId: string;
+  candidateArchiveManifestSha256: string;
+  evaluatorId: string;
+  blindIds: string[];
+  startedAt?: string;
+}): Phase4BlindReviewSession {
+  const startedAt = args.startedAt ?? new Date().toISOString();
+  return phase4BlindReviewSessionSchema.parse({
+    format: PHASE4_BLIND_REVIEW_FORMAT,
+    id: `${args.experimentId}:${args.evaluatorId}:${startedAt}`,
+    experimentId: args.experimentId,
+    candidateArchiveManifestSha256:
+      args.candidateArchiveManifestSha256,
+    evaluatorId: args.evaluatorId.trim(),
+    startedAt,
+    updatedAt: startedAt,
+    status: "in_progress",
+    blindIds: args.blindIds,
+    currentIndex: 0,
+    ratings: [],
+  });
+}
+
+export function recordBlindReviewRating(args: {
+  session: Phase4BlindReviewSession;
+  scores: Record<string, number>;
+  preferenceReason?: string;
+  ratedAt?: string;
+}): Phase4BlindReviewSession {
+  const session = phase4BlindReviewSessionSchema.parse(args.session);
+  if (session.status === "complete") {
+    throw new Error("Blind review session is already complete");
+  }
+  const ratedAt = args.ratedAt ?? new Date().toISOString();
+  const rating = phase4RatingSheetEntrySchema.parse({
+    evaluatorId: session.evaluatorId,
+    blindId: session.blindIds[session.currentIndex],
+    scores: args.scores,
+    preferenceReason: args.preferenceReason?.trim() || undefined,
+    ratedAt,
+  });
+  const currentIndex = session.currentIndex + 1;
+  return phase4BlindReviewSessionSchema.parse({
+    ...session,
+    updatedAt: ratedAt,
+    status:
+      currentIndex === session.blindIds.length ? "complete" : "in_progress",
+    currentIndex,
+    ratings: [...session.ratings, rating],
+  });
+}
+
+export function blindReviewRatingSheet(
+  session: Phase4BlindReviewSession,
+): Phase4RatingSheet {
+  const completed = phase4BlindReviewSessionSchema.parse(session);
+  if (completed.status !== "complete") {
+    throw new Error("Blind review must be complete before exporting ratings");
+  }
+  return phase4RatingSheetSchema.parse({
+    format: PHASE4_RATING_SHEET_FORMAT,
+    experimentId: completed.experimentId,
+    createdAt: completed.updatedAt,
+    ratings: completed.ratings,
+  });
+}
+
+export function mergePhase4RatingSheets(
+  sheets: Phase4RatingSheet[],
+): Phase4RatingSheet {
+  if (!sheets.length) {
+    throw new Error("At least one rating sheet is required");
+  }
+  const parsed = sheets.map((sheet) => phase4RatingSheetSchema.parse(sheet));
+  const experimentId = parsed[0].experimentId;
+  if (parsed.some((sheet) => sheet.experimentId !== experimentId)) {
+    throw new Error("Cannot merge ratings from different experiments");
+  }
+  const ratings = parsed.flatMap((sheet) => sheet.ratings);
+  const seen = new Set<string>();
+  for (const rating of ratings) {
+    const key = `${rating.evaluatorId}:${rating.blindId}`;
+    if (seen.has(key)) {
+      throw new Error(`Duplicate merged rating ${key}`);
+    }
+    seen.add(key);
+  }
+  return phase4RatingSheetSchema.parse({
+    format: PHASE4_RATING_SHEET_FORMAT,
+    experimentId,
+    createdAt: parsed
+      .map((sheet) => sheet.createdAt)
+      .sort()
+      .at(-1)!,
+    ratings,
+  });
+}
 
 export function emptyRatingSheet(args: {
   experimentId: string;

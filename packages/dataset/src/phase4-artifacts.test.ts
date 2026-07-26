@@ -1,14 +1,18 @@
 import { describe, expect, it } from "vitest";
 import {
   attachCandidateArchiveToExperimentNotes,
+  beginBlindReviewSession,
+  blindReviewRatingSheet,
   blankRatingSheetCsv,
   emptyRatingSheet,
   measureEvaluatorConsistency,
+  mergePhase4RatingSheets,
   parseRatingSheetCsv,
   phase4CandidatesFromArchive,
   phase4CaptureChecklist,
   proposePhase4Decision,
   ratingSheetToCsv,
+  recordBlindReviewRating,
   sealCandidateArchive,
   validateRatingSheetForSchedule,
   verifyCandidateArchive,
@@ -239,5 +243,49 @@ describe("Phase 4 empirical artifacts", () => {
         schedule,
       }),
     ).toThrow(/more than once/);
+  });
+
+  it("records blind ratings in schedule order without reveal metadata", () => {
+    let review = beginBlindReviewSession({
+      experimentId: "exp-1",
+      candidateArchiveManifestSha256: "a".repeat(64),
+      evaluatorId: "reviewer-1",
+      blindIds: [
+        "candidate-001",
+        "candidate-002",
+        "candidate-003",
+        "candidate-004",
+      ],
+      startedAt: "2026-07-26T12:00:00.000Z",
+    });
+    const scores = Object.fromEntries(
+      evaluationDimensions.map((dimension) => [dimension, 4]),
+    );
+    for (let index = 0; index < 4; index += 1) {
+      review = recordBlindReviewRating({
+        session: review,
+        scores,
+        preferenceReason: `Review ${index + 1}`,
+        ratedAt: `2026-07-26T12:0${index + 1}:00.000Z`,
+      });
+    }
+    expect(review.status).toBe("complete");
+    expect(JSON.stringify(review)).not.toContain("uncoached_baseline");
+    const sheet = blindReviewRatingSheet(review);
+    expect(sheet.ratings.map((rating) => rating.blindId)).toEqual([
+      "candidate-001",
+      "candidate-002",
+      "candidate-003",
+      "candidate-004",
+    ]);
+    const other = {
+      ...sheet,
+      ratings: sheet.ratings.map((rating) => ({
+        ...rating,
+        evaluatorId: "reviewer-2",
+      })),
+    };
+    expect(mergePhase4RatingSheets([sheet, other]).ratings).toHaveLength(8);
+    expect(() => mergePhase4RatingSheets([sheet, sheet])).toThrow(/Duplicate/);
   });
 });

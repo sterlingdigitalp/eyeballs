@@ -106,6 +106,45 @@ h2 { font-size: 16px; font-weight: 600; margin: 0 0 16px; }
 .readiness-list .blocked { border-color: #69463f; background: #261713; color: #d9b8ae; }
 .readiness-list strong { display: inline-block; min-width: 48px; color: var(--mint); font-size: 11px; letter-spacing: .08em; }
 .readiness-list .blocked strong { color: #df826f; }
+.blind-review-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  overflow: auto;
+  padding: 28px 4vw 60px;
+  background: #07110f;
+}
+.blind-review-header {
+  max-width: 1500px;
+  margin: 0 auto 22px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+}
+.blind-review-header h1 { margin: 4px 0; font-size: 38px; }
+.blind-review-grid {
+  max-width: 1500px;
+  margin: auto;
+  display: grid;
+  grid-template-columns: minmax(520px, 1.25fr) minmax(380px, .75fr);
+  gap: 24px;
+  align-items: start;
+}
+.blind-candidate-video {
+  display: block;
+  width: 100%;
+  max-height: calc(100vh - 220px);
+  border-radius: 14px;
+  background: #000;
+}
+.blind-rubric { display: grid; gap: 12px; }
+.blind-rubric fieldset { margin: 0; }
+.blind-rubric legend { color: #dce8e2; text-transform: capitalize; font-size: 13px; }
+.blind-score-row { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; }
+.blind-score-row label { display: flex; justify-content: center; align-items: center; gap: 5px; padding: 7px; border-radius: 7px; background: #14231f; }
+.blind-rubric > label { display: grid; gap: 7px; color: var(--muted); font-size: 12px; }
+.blind-rubric textarea { resize: vertical; border: 1px solid var(--line); border-radius: 9px; background: #0d1916; color: white; padding: 10px; font: inherit; }
 .train-active-chrome { display: grid; gap: 12px; margin-top: 12px; }
 .countdown-display { font-size: 28px; font-weight: 700; color: var(--mint); margin: 0; }
 .emergency-stop { background: #df826f; color: #1a0906; }
@@ -253,6 +292,7 @@ input, select { background: #111e1a; border: 1px solid var(--line); border-radiu
 .debug-toggle.enabled { color: var(--mint); border-color: #477262; }
 
 @media (max-width: 1050px) {
+  .blind-review-grid { grid-template-columns: 1fr; }
   .setup-grid, .measure-screen { grid-template-columns: 1fr; }
   .app-header { padding: 0 18px; }
 }

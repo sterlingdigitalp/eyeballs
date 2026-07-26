@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   ClipCandidate,
   RecordingAsset,
@@ -6,18 +6,25 @@ import type {
 import {
   attachCandidateArchiveToExperimentNotes,
   auditPresenterTwinReadiness,
+  beginBlindReviewSession,
+  blindReviewRatingSheet,
   blankRatingSheetCsv,
   buildBlindEvaluationSchedule,
   createPhase4GoNoGoDraft,
   createPresenterTwinExperiment,
   expertArtifactChecklist,
+  evaluationDimensions,
   measureEvaluatorConsistency,
+  mergePhase4RatingSheets,
   parseRatingSheet,
   parseRatingSheetCsv,
+  phase4BlindReviewSessionSchema,
   phase4CandidatesFromArchive,
   phase4CaptureChecklist,
   proposePhase4Decision,
   publicBlindScheduleArtifact,
+  ratingSheetToCsv,
+  recordBlindReviewRating,
   phase4ProviderRequirementsSchema,
   sha256Hex,
   summarizeCoachedVsBaseline,
@@ -25,6 +32,8 @@ import {
   verifyCandidateArchive,
   type BlindEvaluationSchedule,
   type DatasetVersionManifest,
+  type EvaluationDimension,
+  type Phase4BlindReviewSession,
   type Phase4CandidateArchive,
   type Phase4RatingSheet,
   type Phase4SourcePackage,
@@ -99,6 +108,22 @@ function archiveBoundKey(
   return `${kind}:${experimentId}:${archiveManifestSha256}`;
 }
 
+function blindReviewKey(
+  experimentId: string,
+  archiveManifestSha256: string,
+  evaluatorId: string,
+): string {
+  return `presenterTwinBlindReview:${experimentId}:${archiveManifestSha256}:${evaluatorId}`;
+}
+
+const emptyBlindScores = (): Partial<Record<EvaluationDimension, number>> =>
+  Object.fromEntries(evaluationDimensions.map((dimension) => [dimension, undefined]));
+
+const dimensionLabel = (dimension: EvaluationDimension): string =>
+  dimension === "artifact_burden"
+    ? "artifact freedom (low burden)"
+    : dimension.replaceAll("_", " ");
+
 export function PresenterTwinPanel({
   sessions,
   clips,
@@ -134,6 +159,17 @@ export function PresenterTwinPanel({
   const [providerDisposition, setProviderDisposition] =
     useState("__unreviewed__");
   const [expertReviewComplete, setExpertReviewComplete] = useState(false);
+  const [candidateMediaUrls, setCandidateMediaUrls] = useState<
+    Record<string, string>
+  >({});
+  const candidateMediaUrlsRef = useRef<Record<string, string>>({});
+  const [evaluatorId, setEvaluatorId] = useState("");
+  const [blindReview, setBlindReview] =
+    useState<Phase4BlindReviewSession>();
+  const [blindReviewVisible, setBlindReviewVisible] = useState(false);
+  const [blindScores, setBlindScores] = useState(emptyBlindScores);
+  const [blindReason, setBlindReason] = useState("");
+  const [blindReviewError, setBlindReviewError] = useState<string>();
 
   useEffect(() => {
     void store.datasetVersions.all().then((raw) => {
@@ -196,6 +232,15 @@ export function PresenterTwinPanel({
         }
       });
   }, [lastExperiment]);
+
+  useEffect(
+    () => () => {
+      Object.values(candidateMediaUrlsRef.current).forEach((url) =>
+        URL.revokeObjectURL(url),
+      );
+    },
+    [],
+  );
 
   useEffect(() => {
     let active = true;
@@ -481,11 +526,240 @@ export function PresenterTwinPanel({
       setPrivateReveal([]);
       setImportedRatings(undefined);
       setAcceptableCandidate("__unreviewed__");
+      Object.values(candidateMediaUrlsRef.current).forEach((url) =>
+        URL.revokeObjectURL(url),
+      );
+      candidateMediaUrlsRef.current = {};
+      setCandidateMediaUrls({});
+      setBlindReview(undefined);
       setMessage(
         `Verified candidate archive attached · ${note.candidateCount} entries · hash ${note.archiveManifestSha256?.slice(0, 12) ?? "n/a"}…`,
       );
     } catch (cause) {
       setMessage(cause instanceof Error ? cause.message : String(cause));
+    }
+  };
+
+  const attachCandidateMedia = async (files: FileList | null) => {
+    if (!candidateArchive || !files?.length) return;
+    try {
+      const selected = [...files];
+      const basenameCounts = new Map<string, number>();
+      for (const entry of candidateArchive.entries) {
+        const basename = entry.playbackRelativePath.split("/").at(-1)!;
+        basenameCounts.set(basename, (basenameCounts.get(basename) ?? 0) + 1);
+      }
+      const matched = new Map<string, File>();
+      for (const entry of candidateArchive.entries) {
+        const basename = entry.playbackRelativePath.split("/").at(-1)!;
+        const file = selected.find((candidate) => {
+          const relative = candidate.webkitRelativePath.replaceAll("\\", "/");
+          return (
+            relative === entry.playbackRelativePath ||
+            relative.endsWith(`/${entry.playbackRelativePath}`) ||
+            (basenameCounts.get(basename) === 1 && candidate.name === basename)
+          );
+        });
+        if (!file) {
+          throw new Error(
+            `Missing candidate media ${entry.playbackRelativePath}`,
+          );
+        }
+        matched.set(entry.playbackRelativePath, file);
+      }
+
+      const verified: Array<readonly [string, File]> = [];
+      // Hash sequentially so several large generated clips are not all held in
+      // memory at once by Web Crypto.
+      for (const entry of candidateArchive.entries) {
+        const file = matched.get(entry.playbackRelativePath)!;
+        const digest = await sha256Hex(
+          new Uint8Array(await file.arrayBuffer()),
+        );
+        if (digest !== entry.sha256.toLowerCase()) {
+          throw new Error(
+            `Media SHA-256 mismatch for ${entry.playbackRelativePath}`,
+          );
+        }
+        verified.push([entry.playbackRelativePath, file] as const);
+      }
+      const nextUrls = Object.fromEntries(
+        verified.map(([path, file]) => [path, URL.createObjectURL(file)]),
+      );
+      Object.values(candidateMediaUrlsRef.current).forEach((url) =>
+        URL.revokeObjectURL(url),
+      );
+      candidateMediaUrlsRef.current = nextUrls;
+      setCandidateMediaUrls(nextUrls);
+      setMessage(
+        `Attached and SHA-256 verified ${verified.length} local candidate videos. Files remain browser-local and must be reattached after restart.`,
+      );
+    } catch (cause) {
+      setMessage(
+        `Candidate media rejected: ${
+          cause instanceof Error ? cause.message : String(cause)
+        }`,
+      );
+    }
+  };
+
+  const startBlindReview = async () => {
+    if (
+      !lastExperiment ||
+      !candidateArchive?.archiveManifestSha256 ||
+      !blindSchedule
+    ) {
+      setMessage("Verify candidates and create a blind schedule first.");
+      return;
+    }
+    const reviewer = evaluatorId.trim();
+    if (!reviewer) {
+      setMessage("Enter a stable evaluator ID.");
+      return;
+    }
+    const missingMedia = blindSchedule.publicEntries.filter(
+      (entry) => !candidateMediaUrls[entry.playbackAssetId],
+    );
+    if (missingMedia.length) {
+      setMessage("Attach and verify every candidate video before review.");
+      return;
+    }
+    if (
+      importedRatings?.ratings.some(
+        (rating) => rating.evaluatorId === reviewer,
+      )
+    ) {
+      setMessage(
+        `Evaluator ${reviewer} already has a completed rating set; use a unique ID.`,
+      );
+      return;
+    }
+    const key = blindReviewKey(
+      lastExperiment.id,
+      candidateArchive.archiveManifestSha256,
+      reviewer,
+    );
+    try {
+      const stored = await store.settings.get<unknown>(key);
+      const session = stored
+        ? phase4BlindReviewSessionSchema.parse(stored)
+        : beginBlindReviewSession({
+            experimentId: lastExperiment.id,
+            candidateArchiveManifestSha256:
+              candidateArchive.archiveManifestSha256,
+            evaluatorId: reviewer,
+            blindIds: blindSchedule.publicEntries.map(
+              (entry) => entry.blindId,
+            ),
+          });
+      if (
+        session.experimentId !== lastExperiment.id ||
+        session.candidateArchiveManifestSha256 !==
+          candidateArchive.archiveManifestSha256 ||
+        session.blindIds.join("|") !==
+          blindSchedule.publicEntries
+            .map((entry) => entry.blindId)
+            .join("|")
+      ) {
+        throw new Error("Saved blind review does not match the active schedule");
+      }
+      if (session.status === "complete") {
+        throw new Error("This evaluator already completed the blind review");
+      }
+      setBlindReview(session);
+      setBlindScores(emptyBlindScores());
+      setBlindReason("");
+      setBlindReviewError(undefined);
+      setBlindReviewVisible(true);
+      await store.settings.put(key, session);
+    } catch (cause) {
+      setMessage(
+        `Blind review could not start: ${
+          cause instanceof Error ? cause.message : String(cause)
+        }`,
+      );
+    }
+  };
+
+  const submitBlindRating = async () => {
+    if (
+      !blindReview ||
+      !lastExperiment ||
+      !candidateArchive?.archiveManifestSha256 ||
+      !blindSchedule
+    ) {
+      return;
+    }
+    if (
+      evaluationDimensions.some(
+        (dimension) => blindScores[dimension] === undefined,
+      )
+    ) {
+      setBlindReviewError("Rate every dimension from 1 to 5.");
+      return;
+    }
+    try {
+      const next = recordBlindReviewRating({
+        session: blindReview,
+        scores: Object.fromEntries(
+          evaluationDimensions.map((dimension) => [
+            dimension,
+            blindScores[dimension]!,
+          ]),
+        ),
+        preferenceReason: blindReason,
+      });
+      const reviewKey = blindReviewKey(
+        lastExperiment.id,
+        candidateArchive.archiveManifestSha256,
+        blindReview.evaluatorId,
+      );
+      await store.settings.put(reviewKey, next);
+      if (next.status === "complete") {
+        const completed = blindReviewRatingSheet(next);
+        const merged = importedRatings
+          ? mergePhase4RatingSheets([importedRatings, completed])
+          : completed;
+        const validated = validateRatingSheetForSchedule({
+          sheet: merged,
+          schedule: blindSchedule,
+        });
+        await store.settings.put(
+          archiveBoundKey(
+            "presenterTwinRatings",
+            lastExperiment.id,
+            candidateArchive.archiveManifestSha256,
+          ),
+          validated,
+        );
+        setImportedRatings(validated);
+        downloadJson(
+          `${lastExperiment.id}-${next.evaluatorId}-ratings.json`,
+          completed,
+        );
+        const csv = ratingSheetToCsv(completed);
+        const blob = new Blob([csv], { type: "text/csv" });
+        const url = URL.createObjectURL(blob);
+        const anchor = document.createElement("a");
+        anchor.href = url;
+        anchor.download = `${lastExperiment.id}-${next.evaluatorId}-ratings.csv`;
+        anchor.click();
+        URL.revokeObjectURL(url);
+        setBlindReview(undefined);
+        setBlindReviewVisible(false);
+        setMessage(
+          `Blind review complete for ${next.evaluatorId}; ratings autosaved and exported without reveal metadata.`,
+        );
+        return;
+      }
+      setBlindReview(next);
+      setBlindScores(emptyBlindScores());
+      setBlindReason("");
+      setBlindReviewError(undefined);
+    } catch (cause) {
+      setBlindReviewError(
+        cause instanceof Error ? cause.message : String(cause),
+      );
     }
   };
 
@@ -596,8 +870,111 @@ export function PresenterTwinPanel({
     setMessage(proposal.rationale);
   };
 
+  const currentBlindEntry =
+    blindReview && blindSchedule
+      ? blindSchedule.publicEntries[blindReview.currentIndex]
+      : undefined;
+  const currentBlindMediaUrl = currentBlindEntry
+    ? candidateMediaUrls[currentBlindEntry.playbackAssetId]
+    : undefined;
+
   return (
     <section className="screen">
+      {blindReviewVisible && blindReview && currentBlindEntry && (
+        <div className="blind-review-overlay" role="dialog" aria-modal="true">
+          <div className="blind-review-header">
+            <div>
+              <p className="eyebrow">Blind presenter review</p>
+              <h1>{currentBlindEntry.blindId}</h1>
+              <p className="muted">
+                Candidate {blindReview.currentIndex + 1} of{" "}
+                {blindReview.blindIds.length} · evaluator{" "}
+                {blindReview.evaluatorId}
+              </p>
+            </div>
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => setBlindReviewVisible(false)}
+            >
+              Exit review
+            </button>
+          </div>
+          <div className="blind-review-grid">
+            <div className="panel">
+              {currentBlindMediaUrl ? (
+                <video
+                  key={currentBlindEntry.blindId}
+                  className="blind-candidate-video"
+                  src={currentBlindMediaUrl}
+                  controls
+                  playsInline
+                  preload="metadata"
+                />
+              ) : (
+                <p className="notice warning">
+                  Verified media is unavailable. Exit and reattach candidates.
+                </p>
+              )}
+              <p className="muted">
+                Condition, provider, filename, and repeat status remain hidden
+                until all ratings are complete.
+              </p>
+            </div>
+            <div className="panel blind-rubric">
+              <h2>Rate this candidate</h2>
+              <p className="muted">
+                Use one direction throughout: 1 = severe or unusable, 3 =
+                acceptable, 5 = excellent or clean.
+              </p>
+              {evaluationDimensions.map((dimension) => (
+                <fieldset key={dimension}>
+                  <legend>{dimensionLabel(dimension)}</legend>
+                  <div className="blind-score-row">
+                    {[1, 2, 3, 4, 5].map((score) => (
+                      <label key={score}>
+                        <input
+                          type="radio"
+                          name={`${currentBlindEntry.blindId}-${dimension}`}
+                          value={score}
+                          checked={blindScores[dimension] === score}
+                          onChange={() =>
+                            setBlindScores((current) => ({
+                              ...current,
+                              [dimension]: score,
+                            }))
+                          }
+                        />
+                        {score}
+                      </label>
+                    ))}
+                  </div>
+                </fieldset>
+              ))}
+              <label>
+                Preference reason or notable artifact
+                <textarea
+                  rows={4}
+                  value={blindReason}
+                  onChange={(event) => setBlindReason(event.target.value)}
+                />
+              </label>
+              {blindReviewError && (
+                <p className="notice warning">{blindReviewError}</p>
+              )}
+              <button
+                type="button"
+                disabled={!currentBlindMediaUrl}
+                onClick={() => void submitBlindRating()}
+              >
+                {blindReview.currentIndex + 1 === blindReview.blindIds.length
+                  ? "Complete blind review"
+                  : "Save rating and continue"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       <div className="screen-copy">
         <p className="eyebrow">Presenter-twin proof</p>
         <h1>Build the controlled A–D test</h1>
@@ -810,6 +1187,23 @@ export function PresenterTwinPanel({
               />
             </label>
             <label>
+              Candidate videos
+              <input
+                type="file"
+                accept="video/*"
+                multiple
+                disabled={!candidateArchive}
+                onChange={(event) =>
+                  void attachCandidateMedia(event.target.files)
+                }
+              />
+            </label>
+            <p className="muted">
+              {Object.keys(candidateMediaUrls).length} of{" "}
+              {candidateArchive?.entries.length ?? 0} media files attached and
+              hash-verified
+            </p>
+            <label>
               Private reveal key (JSON)
               <input
                 type="file"
@@ -831,6 +1225,31 @@ export function PresenterTwinPanel({
                 }
               />
             </label>
+          </div>
+          <h2>In-app blind review</h2>
+          <div className="train-setup">
+            <label>
+              Evaluator ID
+              <input
+                value={evaluatorId}
+                onChange={(event) => setEvaluatorId(event.target.value)}
+                placeholder="evaluator-1"
+              />
+            </label>
+          </div>
+          <div className="button-row">
+            <button
+              type="button"
+              className="secondary"
+              disabled={
+                !blindSchedule ||
+                Object.keys(candidateMediaUrls).length !==
+                  candidateArchive?.entries.length
+              }
+              onClick={() => void startBlindReview()}
+            >
+              Start or resume blind review
+            </button>
           </div>
           <h2>Human success gates</h2>
           <div className="train-setup">
