@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   auditPresenterTwinReadiness,
   buildBlindEvaluationSchedule,
+  createPhase4GoNoGoDraft,
   createPresenterTwinExperiment,
   evaluationDimensions,
+  publicBlindScheduleArtifact,
   summarizeCoachedVsBaseline,
   type BlindCandidateRating,
   type Phase4ProviderRequirements,
@@ -246,6 +248,53 @@ describe("Phase 4 presenter-twin experiment", () => {
       ties: 0,
       coachedWinRate: 0.5,
     });
+  });
+
+  it("builds a pending go/no-go draft and public blind artifact", async () => {
+    const experiment = await createPresenterTwinExperiment({
+      id: "exp-go",
+      createdAt,
+      sourcePackages: sources(),
+      provider,
+    });
+    const draft = createPhase4GoNoGoDraft({ experiment });
+    expect(draft.format).toBe("presenter-twin-go-no-go/1.0.0");
+    expect(draft.decision).toBe("pending");
+    expect(draft.experimentId).toBe("exp-go");
+    expect(draft.openRisks.length).toBeGreaterThan(0);
+
+    const schedule = buildBlindEvaluationSchedule({
+      experimentId: experiment.id,
+      seed: "public-seed",
+      candidates: [
+        {
+          id: "c-a",
+          condition: "uncoached_baseline",
+          playbackAssetId: "p-a",
+        },
+        {
+          id: "c-b",
+          condition: "coached_continuous",
+          playbackAssetId: "p-b",
+        },
+        {
+          id: "c-c",
+          condition: "curated_diverse",
+          playbackAssetId: "p-c",
+        },
+        {
+          id: "c-d",
+          condition: "real_reference",
+          playbackAssetId: "p-d",
+        },
+      ],
+    });
+    const publicArtifact = publicBlindScheduleArtifact(schedule);
+    expect(publicArtifact.entries).toHaveLength(schedule.publicEntries.length);
+    expect(publicArtifact).not.toHaveProperty("privateReveal");
+    expect(
+      JSON.stringify(publicArtifact).includes("uncoached_baseline"),
+    ).toBe(false);
   });
 
   it("reports concrete Phase 4 blockers until all controlled sources exist", () => {

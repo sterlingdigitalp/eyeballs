@@ -5,7 +5,10 @@ import type {
 } from "../../../../packages/contracts/src";
 import {
   auditPresenterTwinReadiness,
+  buildBlindEvaluationSchedule,
+  createPhase4GoNoGoDraft,
   createPresenterTwinExperiment,
+  publicBlindScheduleArtifact,
   phase4ProviderRequirementsSchema,
   sha256Hex,
   type DatasetVersionManifest,
@@ -55,16 +58,22 @@ function validAssetIds(
     .map((asset) => asset.id);
 }
 
-function downloadExperiment(experiment: PresenterTwinExperiment): void {
-  const blob = new Blob([JSON.stringify(experiment, null, 2)], {
+function downloadJson(filename: string, value: unknown): void {
+  const blob = new Blob([JSON.stringify(value, null, 2)], {
     type: "application/json",
   });
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.href = url;
-  anchor.download = `${experiment.id}.json`;
+  anchor.download = filename;
   anchor.click();
   URL.revokeObjectURL(url);
+}
+
+function downloadExperiment(experiment: PresenterTwinExperiment): void {
+  downloadJson(`${experiment.id}.json`, experiment);
+  const draft = createPhase4GoNoGoDraft({ experiment });
+  downloadJson(`${experiment.id}-go-no-go-draft.json`, draft);
 }
 
 export function PresenterTwinPanel({
@@ -86,11 +95,18 @@ export function PresenterTwinPanel({
   const [scriptSha256, setScriptSha256] = useState("");
   const [providerJson, setProviderJson] = useState(providerTemplate);
   const [message, setMessage] = useState<string>();
+  const [lastExperiment, setLastExperiment] =
+    useState<PresenterTwinExperiment>();
 
   useEffect(() => {
     void store.datasetVersions.all().then((raw) => {
       setVersions(raw as DatasetVersionManifest[]);
     });
+    void store.settings
+      .get<PresenterTwinExperiment[]>("presenterTwinExperiments")
+      .then((existing) => {
+        if (existing?.[0]) setLastExperiment(existing[0]);
+      });
   }, []);
 
   useEffect(() => {
@@ -246,9 +262,10 @@ export function PresenterTwinPanel({
         experiment,
         ...existing.filter((entry) => entry.id !== experiment.id),
       ]);
+      setLastExperiment(experiment);
       downloadExperiment(experiment);
       setMessage(
-        `Created ${experiment.id} · ${experiment.generationRequests.length} reproducible generation requests · ${experiment.manifestSha256.slice(0, 12)}…`,
+        `Created ${experiment.id} · ${experiment.generationRequests.length} reproducible generation requests · ${experiment.manifestSha256.slice(0, 12)}… · go/no-go draft downloaded`,
       );
     } catch (cause) {
       setMessage(cause instanceof Error ? cause.message : String(cause));
@@ -397,8 +414,49 @@ export function PresenterTwinPanel({
             >
               Create experiment manifest
             </button>
+            <button
+              type="button"
+              className="secondary"
+              disabled={!lastExperiment}
+              onClick={() => {
+                if (!lastExperiment) return;
+                const schedule = buildBlindEvaluationSchedule({
+                  experimentId: lastExperiment.id,
+                  seed: `${lastExperiment.id}:blind`,
+                  candidates: lastExperiment.sourcePackages.map((source) => ({
+                    id: `${source.id}-candidate-0`,
+                    condition: source.condition,
+                    playbackAssetId: source.assetIds[0] ?? source.id,
+                    providerId: lastExperiment.provider.providerId,
+                    providerVersion: lastExperiment.provider.providerVersion,
+                  })),
+                });
+                downloadJson(
+                  `${lastExperiment.id}-blind-public.json`,
+                  publicBlindScheduleArtifact(schedule),
+                );
+                downloadJson(
+                  `${lastExperiment.id}-blind-reveal-private.json`,
+                  {
+                    format: schedule.format,
+                    experimentId: schedule.experimentId,
+                    privateReveal: schedule.privateReveal,
+                  },
+                );
+                setMessage(
+                  "Downloaded public blind schedule (no conditions) and private reveal key — keep reveal offline.",
+                );
+              }}
+            >
+              Export blind schedule
+            </button>
           </div>
           {message && <p className="muted">{message}</p>}
+          <p className="muted">
+            Empirical next: capture matched A–D sealed masters (CaptureCore),
+            select a provider, produce candidates, run blind review, then set
+            go/no-go. No upload is performed by this screen.
+          </p>
         </div>
       </div>
     </section>

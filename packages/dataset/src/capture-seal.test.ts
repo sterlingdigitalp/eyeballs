@@ -154,4 +154,15 @@ describe("CaptureCore seal ingestion", () => {
     );
     expect(result.assets).toHaveLength(4);
   });
+
+  it("accepts Stage 6 soak hash authority for sealed masters", () => {
+    const result = ingestCaptureCoreSeal({
+      ...seal(),
+      hashedBy: "python-sha256-soak",
+    });
+    expect(result.assets).toHaveLength(4);
+    expect(
+      result.jobs.find((job) => job.kind === "hash_assets")?.workerId,
+    ).toBe("capture-core/rust-sha2");
+  });
 });

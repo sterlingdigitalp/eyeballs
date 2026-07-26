@@ -174,6 +174,15 @@ export function planAnalysisJobsFromCaptureSeal(
   });
 }
 
+/** Cryptographic SHA-256 writers we accept for production masters. */
+export function isTrustedCaptureHashAuthority(hashedBy: string): boolean {
+  return (
+    hashedBy === "rust-sha2" ||
+    hashedBy === "python-sha256-soak" ||
+    hashedBy.startsWith("python-sha256-soak")
+  );
+}
+
 /**
  * Convert a clean CaptureCore seal into immutable master assets and a worker
  * DAG. This trusts no path outside the sealed session root and never re-hashes
@@ -192,7 +201,7 @@ export function ingestCaptureCoreSeal(
   if (seal.dryRun && !options.allowDryRun) {
     throw new Error("Dry-run CaptureCore seals cannot become dataset masters");
   }
-  if (seal.hashedBy !== "rust-sha2") {
+  if (!isTrustedCaptureHashAuthority(seal.hashedBy)) {
     throw new Error(`Unsupported CaptureCore hash authority: ${seal.hashedBy}`);
   }
   if (seal.segmentCount !== seal.segments.length || seal.segmentCount === 0) {

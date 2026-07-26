@@ -543,6 +543,77 @@ export function validateBlindCandidateRating(
   return rating;
 }
 
+/**
+ * Publishable Phase 4 go/no-go skeleton. Fill empirical fields after blind review.
+ * Does not claim a result until `decision` is set by humans.
+ */
+export interface Phase4GoNoGoReport {
+  format: "presenter-twin-go-no-go/1.0.0";
+  experimentId: string;
+  createdAt: string;
+  thesis: string;
+  conditions: PresenterTwinCondition[];
+  providerId?: string;
+  providerVersion?: string;
+  blindScheduleSeed?: string;
+  coachedVsBaseline?: {
+    coachedWins: number;
+    baselineWins: number;
+    ties: number;
+    coachedWinRate: number;
+  };
+  decision: "pending" | "go" | "no_go" | "inconclusive";
+  decisionRationale: string;
+  openRisks: string[];
+}
+
+export function createPhase4GoNoGoDraft(args: {
+  experiment: PresenterTwinExperiment;
+  createdAt?: string;
+  coachedVsBaseline?: {
+    coachedWins: number;
+    baselineWins: number;
+    ties: number;
+    coachedWinRate: number;
+  };
+  openRisks?: string[];
+}): Phase4GoNoGoReport {
+  return {
+    format: "presenter-twin-go-no-go/1.0.0",
+    experimentId: args.experiment.id,
+    createdAt: args.createdAt ?? new Date().toISOString(),
+    thesis:
+      "Intentionally coached, curated footage produces a more convincing presenter twin than ordinary uncoached source footage.",
+    conditions: [...presenterTwinConditions],
+    providerId: args.experiment.provider.providerId || undefined,
+    providerVersion: args.experiment.provider.providerVersion || undefined,
+    coachedVsBaseline: args.coachedVsBaseline,
+    decision: "pending",
+    decisionRationale:
+      "Empirical blind evaluation and human review not yet complete.",
+    openRisks: args.openRisks ?? [
+      "No generation candidates produced yet",
+      "Blind ratings empty",
+      "Provider not selected or not run",
+    ],
+  };
+}
+
+/** Public blind schedule (no condition/provider reveal) for evaluators. */
+export function publicBlindScheduleArtifact(
+  schedule: BlindEvaluationSchedule,
+): {
+  format: BlindEvaluationSchedule["format"];
+  experimentId: string;
+  entries: BlindEvaluationSchedule["publicEntries"];
+} {
+  return {
+    format: schedule.format,
+    experimentId: schedule.experimentId,
+    entries: schedule.publicEntries,
+  };
+}
+
 export function summarizeCoachedVsBaseline(args: {
   schedule: BlindEvaluationSchedule;
   ratings: BlindCandidateRating[];

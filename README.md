@@ -5,9 +5,10 @@ Local-first macOS camera-contact coaching application. Status (see
 
 - **Phase 1:** measurement kernel largely implemented; human/hardware acceptance still open
 - **Phase 2:** integrated coaching **prototype** (drills, cues, train/review/progress) — not an accepted MVP
-- **Phase 3:** dataset **domain scaffolding and UI prototype** only — not a production CaptureCore/worker/export engine
+- **Phase 3:** dataset scaffolding + CaptureCore seal ingest (production masters via CaptureCore branch)
+- **Phase 4:** controlled presenter-twin proof **contracts + readiness UI** begun — no provider upload yet
 
-Generation remains Phase 4+.
+CaptureCore live stages and Stage 6 soaks: branch `feature/capture-core` (see that worktree handoff).
 
 ## Development
 
