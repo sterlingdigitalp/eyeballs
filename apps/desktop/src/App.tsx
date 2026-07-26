@@ -4235,6 +4235,7 @@ export default function App() {
       {page === "curate" && (
         <CuratePanel
           sessions={sessions}
+          consents={consents}
           clips={datasetClips}
           onClipsChange={setDatasetClips}
         />

@@ -162,6 +162,9 @@ button.secondary { background: #20342e; color: #e8f2ec; border: 1px solid #36534
 .profile-editor label { display: grid; gap: 5px; margin: 9px 0; color: var(--muted); font-size: 12px; }
 .profile-editor .feature-flag { display: flex; align-items: flex-start; gap: 9px; line-height: 1.4; }
 .feature-flag input { margin-top: 1px; }
+.panel > video { width: 100%; max-height: 520px; margin-top: 12px; border-radius: 12px; background: #000; }
+.panel fieldset { margin-top: 18px; border: 1px solid var(--line); border-radius: 12px; padding: 12px; }
+.panel fieldset .feature-flag { display: inline-flex; align-items: flex-start; gap: 7px; margin: 5px 14px 5px 0; }
 .format, .muted { color: var(--muted); font-size: 13px; }
 .calibration-screen .preview { max-width: 900px; }
 .calibration-screen.active-calibration { padding-top: 24px; }

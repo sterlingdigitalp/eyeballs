@@ -1,9 +1,15 @@
-import { useMemo, useState } from "react";
-import type { ClipCandidate } from "../../../../packages/contracts/src";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type {
+  ClipCandidate,
+  ConsentRecord,
+} from "../../../../packages/contracts/src";
 import {
   allClipLabels,
   applyCurationKey,
+  assertCanPromoteToDataset,
   createHumanClip,
+  curationReasonTags,
+  toggleClipReasonTag,
   type CurationKeyAction,
 } from "../../../../packages/dataset/src";
 import { store, type StoredSession } from "../lib/store";
@@ -22,24 +28,66 @@ const KEY_MAP: Record<string, CurationKeyAction> = {
 
 export function CuratePanel({
   sessions,
+  consents,
   clips,
   onClipsChange,
 }: {
   sessions: StoredSession[];
+  consents: ConsentRecord[];
   clips: ClipCandidate[];
   onClipsChange: (next: ClipCandidate[]) => void;
 }) {
   const coached = sessions.filter((session) => session.manifest.status === "complete");
   const [sessionId, setSessionId] = useState(coached[0]?.manifest.id ?? "");
-  const [selectedId, setSelectedId] = useState(clips[0]?.id);
+  const [selectedId, setSelectedId] = useState<string | undefined>(
+    clips[0]?.id,
+  );
   const [rangeStartSec, setRangeStartSec] = useState("0");
   const [rangeEndSec, setRangeEndSec] = useState("3");
-  const selected = clips.find((clip) => clip.id === selectedId) ?? clips[0];
+  const [rangeError, setRangeError] = useState<string>();
+  const [mediaUrl, setMediaUrl] = useState<string>();
+  const playerRef = useRef<HTMLVideoElement>(null);
 
   const sessionClips = useMemo(
     () => clips.filter((clip) => clip.sessionId === sessionId),
     [clips, sessionId],
   );
+  const selected =
+    sessionClips.find((clip) => clip.id === selectedId) ?? sessionClips[0];
+  const selectedSession = sessions.find(
+    (session) => session.manifest.id === selected?.sessionId,
+  );
+  useEffect(() => {
+    if (!selectedSession?.media) {
+      setMediaUrl(undefined);
+      return;
+    }
+    const nextUrl = URL.createObjectURL(selectedSession.media);
+    setMediaUrl(nextUrl);
+    return () => URL.revokeObjectURL(nextUrl);
+  }, [selectedSession?.media]);
+  useEffect(() => {
+    if (playerRef.current && selected) {
+      playerRef.current.currentTime = Math.max(
+        0,
+        selected.startUs / 1_000_000 - 3,
+      );
+    }
+  }, [mediaUrl, selected]);
+  const promotionStatus = useMemo(() => {
+    if (!selectedSession) return "No source session is selected.";
+    try {
+      assertCanPromoteToDataset({
+        session: selectedSession.manifest,
+        consents,
+      });
+      return "Dataset promotion consent is active.";
+    } catch (cause) {
+      return cause instanceof Error
+        ? `Not promotion-ready: ${cause.message}`
+        : "Not promotion-ready.";
+    }
+  }, [consents, selectedSession]);
 
   const persist = async (next: ClipCandidate[]) => {
     await store.clips.putAll(next);
@@ -52,6 +100,13 @@ export function CuratePanel({
       data-dataset-curate="true"
       onKeyDown={(event) => {
         if (!selected) return;
+        if (
+          event.target instanceof HTMLInputElement ||
+          event.target instanceof HTMLSelectElement ||
+          event.target instanceof HTMLTextAreaElement
+        ) {
+          return;
+        }
         const action = KEY_MAP[event.key];
         if (!action) return;
         event.preventDefault();
@@ -73,7 +128,16 @@ export function CuratePanel({
       <div className="panel">
         <label>
           Session
-          <select value={sessionId} onChange={(event) => setSessionId(event.target.value)}>
+          <select
+            value={sessionId}
+            onChange={(event) => {
+              const nextSessionId = event.target.value;
+              setSessionId(nextSessionId);
+              setSelectedId(
+                clips.find((clip) => clip.sessionId === nextSessionId)?.id,
+              );
+            }}
+          >
             {coached.map((session) => (
               <option key={session.manifest.id} value={session.manifest.id}>
                 {session.manifest.id.slice(0, 8)} ·{" "}
@@ -100,9 +164,34 @@ export function CuratePanel({
             className="secondary"
             onClick={() => {
               if (!sessionId) return;
-              const startUs = Math.max(0, Math.round(Number(rangeStartSec) * 1_000_000));
-              const endUs = Math.max(startUs + 1, Math.round(Number(rangeEndSec) * 1_000_000));
+              const startSeconds = Number(rangeStartSec);
+              const endSeconds = Number(rangeEndSec);
+              if (
+                !Number.isFinite(startSeconds) ||
+                !Number.isFinite(endSeconds) ||
+                startSeconds < 0 ||
+                endSeconds <= startSeconds
+              ) {
+                setRangeError(
+                  "Enter finite times with the end after the non-negative start.",
+                );
+                return;
+              }
+              const source = sessions.find(
+                (session) => session.manifest.id === sessionId,
+              );
+              const durationSeconds =
+                (source?.manifest.media?.durationUs ?? 0) / 1_000_000;
+              if (durationSeconds > 0 && endSeconds > durationSeconds) {
+                setRangeError(
+                  `The range must end within ${durationSeconds.toFixed(2)} seconds.`,
+                );
+                return;
+              }
+              const startUs = Math.round(startSeconds * 1_000_000);
+              const endUs = Math.round(endSeconds * 1_000_000);
               const clip = createHumanClip(sessionId, startUs, endUs);
+              setRangeError(undefined);
               void persist([...clips, clip]);
               setSelectedId(clip.id);
             }}
@@ -110,6 +199,7 @@ export function CuratePanel({
             Add range
           </button>
         </div>
+        {rangeError && <p className="tracking-warning">{rangeError}</p>}
       </div>
       <div className="panel">
         {!sessionClips.length && (
@@ -136,23 +226,176 @@ export function CuratePanel({
         ))}
       </div>
       {selected && (
-        <div className="button-row">
-          {allClipLabels().map((label) => (
+        <div className="panel">
+          <h2>Selected clip evidence</h2>
+          <p className={promotionStatus.startsWith("Dataset") ? "pass" : "muted"}>
+            {promotionStatus}
+          </p>
+          {mediaUrl ? (
+            <>
+              <video ref={playerRef} src={mediaUrl} controls playsInline />
+              <div className="button-row">
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={() => {
+                    if (playerRef.current) {
+                      playerRef.current.currentTime = Math.max(
+                        0,
+                        selected.startUs / 1_000_000 - 3,
+                      );
+                    }
+                  }}
+                >
+                  Play 3s context
+                </button>
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={() => {
+                    if (playerRef.current) {
+                      playerRef.current.currentTime =
+                        selected.startUs / 1_000_000;
+                    }
+                  }}
+                >
+                  Jump to in point
+                </button>
+              </div>
+            </>
+          ) : (
+            <p className="muted">
+              Browser review media is unavailable for this session. Native
+              master/proxy playback will attach here when the file-based worker
+              path is integrated.
+            </p>
+          )}
+          <div className="button-row">
+            {allClipLabels().map((label) => (
+              <button
+                key={label}
+                type="button"
+                className="secondary"
+                onClick={() => {
+                  const updated = applyCurationKey(
+                    selected,
+                    `label_${label}` as CurationKeyAction,
+                  );
+                  void persist(
+                    clips.map((clip) =>
+                      clip.id === updated.id ? updated : clip,
+                    ),
+                  );
+                }}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <fieldset>
+            <legend>Reason tags</legend>
+            {curationReasonTags.map((tag) => (
+              <label className="feature-flag" key={tag}>
+                <input
+                  type="checkbox"
+                  checked={selected.reasonTags.includes(tag)}
+                  onChange={() => {
+                    const updated = toggleClipReasonTag(selected, tag);
+                    void persist(
+                      clips.map((clip) =>
+                        clip.id === updated.id ? updated : clip,
+                      ),
+                    );
+                  }}
+                />
+                {tag.replaceAll("_", " ")}
+              </label>
+            ))}
+          </fieldset>
+          <div className="button-row">
             <button
-              key={label}
               type="button"
               className="secondary"
               onClick={() => {
                 const updated = applyCurationKey(
                   selected,
-                  `label_${label}` as CurationKeyAction,
+                  "nudge_start_left",
                 );
-                void persist(clips.map((clip) => (clip.id === updated.id ? updated : clip)));
+                void persist(
+                  clips.map((clip) =>
+                    clip.id === updated.id ? updated : clip,
+                  ),
+                );
               }}
             >
-              {label}
+              In −0.1s
             </button>
-          ))}
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => {
+                const updated = applyCurationKey(
+                  selected,
+                  "nudge_start_right",
+                );
+                void persist(
+                  clips.map((clip) =>
+                    clip.id === updated.id ? updated : clip,
+                  ),
+                );
+              }}
+            >
+              In +0.1s
+            </button>
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => {
+                const updated = applyCurationKey(selected, "nudge_end_left");
+                void persist(
+                  clips.map((clip) =>
+                    clip.id === updated.id ? updated : clip,
+                  ),
+                );
+              }}
+            >
+              Out −0.1s
+            </button>
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => {
+                const updated = applyCurationKey(selected, "nudge_end_right");
+                void persist(
+                  clips.map((clip) =>
+                    clip.id === updated.id ? updated : clip,
+                  ),
+                );
+              }}
+            >
+              Out +0.1s
+            </button>
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => {
+                if (
+                  !window.confirm(
+                    "Remove this clip proposal? The source session and master recording will be retained.",
+                  )
+                ) {
+                  return;
+                }
+                const next = clips.filter((clip) => clip.id !== selected.id);
+                void persist(next);
+                setSelectedId(
+                  next.find((clip) => clip.sessionId === sessionId)?.id,
+                );
+              }}
+            >
+              Remove proposal
+            </button>
+          </div>
         </div>
       )}
     </section>

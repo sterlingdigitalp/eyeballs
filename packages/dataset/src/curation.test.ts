@@ -3,8 +3,10 @@ import {
   adjustClipBoundary,
   allClipLabels,
   applyCurationKey,
+  curationReasonTags,
   createHumanClip,
   labelClip,
+  toggleClipReasonTag,
 } from "./curation";
 
 describe("curation labels and boundaries", () => {
@@ -34,5 +36,30 @@ describe("curation labels and boundaries", () => {
     expect(excellent.label).toBe("excellent");
     const nudged = applyCurationKey(clip, "nudge_start_left", 200_000);
     expect(nudged.startUs).toBe(1_800_000);
+  });
+
+  it("adds and removes only recognized human curation reasons", () => {
+    const clip = createHumanClip("s3", 0, 2_000_000);
+    const tagged = toggleClipReasonTag(clip, "verbal_mistake");
+    expect(tagged.reasonTags).toEqual(["verbal_mistake"]);
+    expect(tagged.proposedBy).toBe("human");
+    expect(toggleClipReasonTag(tagged, "verbal_mistake").reasonTags).toEqual([]);
+    expect(curationReasonTags).toContain("privacy_sensitive");
+    expect(() =>
+      toggleClipReasonTag(clip, "made_up" as "verbal_mistake"),
+    ).toThrow(/Invalid/);
+  });
+
+  it("rejects non-finite human clip boundaries", () => {
+    expect(() => createHumanClip("s4", Number.NaN, 2_000_000)).toThrow(
+      /Invalid range/,
+    );
+    expect(() =>
+      adjustClipBoundary(
+        createHumanClip("s4", 0, 2_000_000),
+        0,
+        Number.POSITIVE_INFINITY,
+      ),
+    ).toThrow(/finite integer/);
   });
 });

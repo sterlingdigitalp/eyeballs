@@ -2391,7 +2391,7 @@ Tasks:
 - [x] Preserve original model output and corrected text separately.
 - [x] Derive sentence boundaries from timestamped words; richer utterance boundaries remain open.
 - [ ] Mark sections with crosstalk or external audio.
-- [ ] Never infer consent from spoken words; consent remains a separate UI action.
+- [x] Never infer consent from spoken words; consent remains a separate UI action.
 
 ### 13.8 Work package P3-F — Offline face and motion analysis
 
@@ -2482,6 +2482,16 @@ Keep component scores visible:
 Technical scores are recommendations. A technically imperfect clip may be valuable for rare expression or phonetic coverage.
 
 ### 13.11 Work package P3-I — Human curation
+
+Implementation note — 2026-07-26:
+
+- Curate supports five labels, keyboard and visible boundary nudges, the complete
+  controlled rejection-reason vocabulary, and explicit session consent status;
+- browser-held review media provides clip plus three-second source-context
+  playback; native proxy/master playback remains dependent on the file-worker
+  integration;
+- removing a clip proposal requires confirmation and retains the source session
+  and immutable master.
 
 The curation screen must support:
 

@@ -1,7 +1,40 @@
 import { clipLabels, type ClipCandidate, type ClipLabel } from "../../contracts/src";
 
+export const curationReasonTags = [
+  "weak_contact",
+  "unnatural_expression",
+  "verbal_mistake",
+  "audio_noise",
+  "clipping",
+  "focus_exposure_issue",
+  "duplicate",
+  "unwanted_outfit_background",
+  "privacy_sensitive",
+  "interrupted",
+  "poor_sync",
+  "not_representative",
+] as const;
+export type CurationReasonTag = (typeof curationReasonTags)[number];
+
 export function isClipLabel(value: string): value is ClipLabel {
   return (clipLabels as readonly string[]).includes(value);
+}
+
+export function toggleClipReasonTag(
+  clip: ClipCandidate,
+  tag: CurationReasonTag,
+): ClipCandidate {
+  if (!curationReasonTags.includes(tag)) {
+    throw new Error(`Invalid curation reason tag: ${tag}`);
+  }
+  const reasonTags = clip.reasonTags.includes(tag)
+    ? clip.reasonTags.filter((existing) => existing !== tag)
+    : [...clip.reasonTags, tag];
+  return {
+    ...clip,
+    reasonTags,
+    proposedBy: "human",
+  };
 }
 
 export function labelClip(
@@ -25,6 +58,9 @@ export function adjustClipBoundary(
   startUs: number,
   endUs: number,
 ): ClipCandidate {
+  if (!Number.isSafeInteger(startUs) || !Number.isSafeInteger(endUs)) {
+    throw new Error("Clip boundaries must be finite integer microseconds");
+  }
   if (endUs <= startUs) {
     throw new Error("Clip endUs must be greater than startUs");
   }
@@ -46,7 +82,14 @@ export function createHumanClip(
   endUs: number,
   label?: ClipLabel,
 ): ClipCandidate {
-  if (endUs <= startUs) throw new Error("Invalid range");
+  if (
+    !Number.isSafeInteger(startUs) ||
+    !Number.isSafeInteger(endUs) ||
+    startUs < 0 ||
+    endUs <= startUs
+  ) {
+    throw new Error("Invalid range");
+  }
   return {
     id: `${sessionId}-human-${startUs}-${endUs}`,
     sessionId,
