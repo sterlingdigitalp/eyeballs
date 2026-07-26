@@ -59,3 +59,20 @@ cd /Users/sterlingdigital/eyeballs-capture-core
 sh scripts/dev/test-capture-core-dry-run.sh
 # expects preview_frame events + preview/latest.jpg
 ```
+
+### Human live smoke — 2026-07-26 (PASS)
+
+Host: Terminal + packaged `CaptureCore.app` (not agent/hive parent)  
+Session: `/tmp/capture-core-stage5-live-smoke` · 1080p Brio + Yeti · 12s · exit **0**
+
+| Check | Result |
+|---|---|
+| Dual Brio + Yeti | Pass · PCM audio |
+| Active format | 1920×1080, range 5–30 fps |
+| `preview_frame` count | **50** in ~12s (~4.2 fps achieved vs 5 fps cap) |
+| Last preview | **640×360** · 38 363 bytes · **~6.9 ms** encode · `transport: file` |
+| `preview/latest.jpg` | Valid JPEG (JFIF) |
+| Masters | 2 segments video+audio |
+| `recording-finished` | OK |
+
+Agent/hive parent cannot run live smoke (TCC abort); Terminal or Tauri product parent required.
