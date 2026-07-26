@@ -2003,6 +2003,9 @@ Implemented and covered by device-free tests:
 - Review import for timestamped transcript JSON plus manual add/edit/delete
   controls for non-overlapping sentence boundaries, with corrected boundaries
   feeding the timeline, analysis export, and Markdown/JSON session report;
+- direct timestamped word-text correction in Review, preserving word timing,
+  immutable model output, and an append-only correction history across
+  browser/native checkpoint merges;
 - durable review-only clip in/out selections with playhead controls, timeline
   segments, and analysis/report export, without automatic dataset promotion;
 - accessible rolling sparklines for every like-for-like Progress metric, while
@@ -2024,7 +2027,6 @@ Still open for later Phase 2 slices:
 
 - custom-drill editing/deletion and richer per-beat timing controls;
 - local ASR worker integration and automatic transcript attachment;
-- word-text correction;
 - optional non-manipulative practice-streak decision;
 - real transparent always-on-top Tauri live-assist window and global shortcut.
 
@@ -2117,7 +2119,7 @@ Implementation status:
 - [x] Preserve original model/stub transcript evidence separately from corrections.
 - [x] Import, add, edit, delete, validate, and persist sentence-boundary corrections.
 - [ ] Integrate and supervise a local Whisper/MLX-Whisper worker.
-- [ ] Add direct word-text correction in Review.
+- [x] Add direct word-text correction in Review with revision history.
 
 ### 12.7 Work package P2-E — Review timeline
 
@@ -2363,13 +2365,25 @@ Every step has:
 
 ### 13.7 Work package P3-E — Transcription and speech structure
 
+Implementation note — 2026-07-26:
+
+- `speech-structure/1.0.0` deterministically derives review candidates for long
+  pauses, unfinished fragments, repeated-phrase retakes, and short VAD gaps
+  inside unfinished utterances;
+- candidate evidence and confidence are visible in Review and included in the
+  analysis export; labels remain human-review hints and never rewrite source
+  transcript evidence;
+- the segment proposal engine rejects ranges overlapping false-start,
+  retake, or interruption candidates while retaining long pauses as useful edit
+  handles.
+
 Tasks:
 
 - [ ] Run local Whisper/MLX-Whisper.
 - [x] Preserve word-level timestamps when available.
 - [x] Run voice activity detection.
-- [ ] Detect long pauses, retakes, false starts, and interruptions.
-- [x] Allow sentence-boundary correction; direct word-text editing remains open.
+- [x] Detect long pauses, retakes, false starts, and interruption candidates.
+- [x] Allow sentence-boundary and direct word-text correction with revision history.
 - [x] Preserve original model output and corrected text separately.
 - [x] Derive sentence boundaries from timestamped words; richer utterance boundaries remain open.
 - [ ] Mark sections with crosstalk or external audio.

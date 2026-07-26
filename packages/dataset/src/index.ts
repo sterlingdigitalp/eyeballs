@@ -4,6 +4,7 @@ export * from "./av-sync";
 export * from "./preflight";
 export * from "./finalize";
 export * from "./transcription";
+export * from "./speech-structure";
 export * from "./offline-face";
 export * from "./segmentation";
 export * from "./quality";

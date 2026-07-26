@@ -53,4 +53,31 @@ describe("segment proposals", () => {
     });
     expect(proposals).toHaveLength(0);
   });
+
+  it("rejects clean-segment proposals that overlap a verbal mistake candidate", () => {
+    const proposals = proposeSegments({
+      sessionId: "seg-retake",
+      durationUs: 20_000_000,
+      sentences: [
+        {
+          index: 0,
+          startUs: 1_000_000,
+          endUs: 8_000_000,
+          text: "I will restart this sentence.",
+        },
+      ],
+      speechStructureEvents: [
+        {
+          id: "retake-1",
+          kind: "retake_candidate",
+          startUs: 3_000_000,
+          endUs: 4_500_000,
+          confidence: 0.8,
+          evidence: ["repeated phrase"],
+        },
+      ],
+    });
+
+    expect(proposals).toHaveLength(0);
+  });
 });

@@ -1,5 +1,6 @@
 import type { GazeEvent, GazePrediction } from "../../contracts/src";
 import type { SentenceBoundary, SpeakingWindow } from "../../coaching/src/speaking";
+import type { SpeechStructureEvent } from "./speech-structure";
 
 export interface SegmentProposal {
   id: string;
@@ -19,6 +20,7 @@ export interface SegmentProposalInput {
   speakingWindows?: SpeakingWindow[];
   predictions?: GazePrediction[];
   events?: GazeEvent[];
+  speechStructureEvents?: SpeechStructureEvent[];
 }
 
 function bandForDuration(durationUs: number): SegmentProposal["band"] {
@@ -79,9 +81,11 @@ export function proposeSegments(input: SegmentProposalInput): SegmentProposal[] 
     }
   }
 
+  let filtered = proposals;
+
   // Reject segments that contain a long gaze break (>3s) inside the range.
   if (input.events?.length) {
-    return proposals.filter((proposal) => {
+    filtered = filtered.filter((proposal) => {
       const longBreak = input.events!.some(
         (event) =>
           event.type === "break" &&
@@ -93,5 +97,23 @@ export function proposeSegments(input: SegmentProposalInput): SegmentProposal[] 
       return !longBreak;
     });
   }
-  return proposals;
+
+  // Long pauses can provide useful edit handles. The other speech-structure
+  // candidates indicate content that should not enter an automatically
+  // proposed clean range without human review.
+  const verbalMistakes = (input.speechStructureEvents ?? []).filter(
+    (event) => event.kind !== "long_pause",
+  );
+  if (verbalMistakes.length) {
+    filtered = filtered.filter(
+      (proposal) =>
+        !verbalMistakes.some(
+          (event) =>
+            event.startUs < proposal.endUs &&
+            event.endUs > proposal.startUs,
+        ),
+    );
+  }
+
+  return filtered;
 }

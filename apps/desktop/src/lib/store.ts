@@ -49,6 +49,8 @@ export interface StoredSession {
   transcript?: TranscriptDocument;
   /** User-corrected words and/or sentence boundaries. */
   correctedTranscript?: TranscriptDocument;
+  /** Append-only user-corrected transcript revisions for audit and recovery. */
+  transcriptRevisions?: TranscriptDocument[];
   media?: Blob;
 }
 

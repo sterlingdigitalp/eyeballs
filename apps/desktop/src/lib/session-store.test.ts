@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { calibration } from "../../../../packages/measurement/src/test-fixtures";
 import type { StoredSession } from "./store";
 import {
+  appendTranscriptRevision,
   mergeStoredSessions,
   parseStoredSession,
   SessionWriteQueue,
@@ -158,6 +159,7 @@ describe("session checkpoint merge", () => {
       sentences: [{ index: 0, startUs: 0, endUs: 500_000, text: "Hello." }],
       updatedAt: "2026-07-26T12:02:00.000Z",
     };
+    browser.transcriptRevisions = [browser.correctedTranscript];
     const native = session("1", "complete", 42);
     native.transcript = browser.transcript;
     native.correctedTranscript = {
@@ -165,9 +167,36 @@ describe("session checkpoint merge", () => {
       sentences: [{ index: 0, startUs: 0, endUs: 450_000, text: "Hello." }],
       updatedAt: "2026-07-26T12:01:00.000Z",
     };
+    native.transcriptRevisions = [native.correctedTranscript];
     const [merged] = mergeStoredSessions([browser], [native]);
     expect(merged.transcript?.origin).toBe("model");
     expect(merged.correctedTranscript?.sentences[0].endUs).toBe(500_000);
+    expect(merged.transcriptRevisions).toHaveLength(2);
+    expect(merged.transcriptRevisions?.at(-1)?.sentences[0].endUs).toBe(500_000);
+  });
+
+  it("appends user-corrected transcript revisions without replacing original evidence", () => {
+    const value = session("1", "complete", 42);
+    value.transcript = {
+      sessionId: "1",
+      modelVersion: "local-asr/1",
+      origin: "model",
+      words: [{ text: "Hello.", startUs: 0, endUs: 400_000 }],
+      sentences: [{ index: 0, startUs: 0, endUs: 400_000, text: "Hello." }],
+      updatedAt: "2026-07-26T12:00:00.000Z",
+    };
+    const corrected = {
+      ...value.transcript,
+      origin: "user_corrected" as const,
+      words: [{ text: "Hi.", startUs: 0, endUs: 400_000 }],
+      sentences: [{ index: 0, startUs: 0, endUs: 400_000, text: "Hi." }],
+      updatedAt: "2026-07-26T12:01:00.000Z",
+    };
+
+    const updated = appendTranscriptRevision(value, corrected);
+    expect(updated.transcript?.words[0].text).toBe("Hello.");
+    expect(updated.correctedTranscript?.words[0].text).toBe("Hi.");
+    expect(updated.transcriptRevisions).toEqual([corrected]);
   });
 
   it("returns unique sessions newest first", () => {

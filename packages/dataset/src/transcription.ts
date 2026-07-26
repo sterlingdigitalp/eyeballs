@@ -68,6 +68,55 @@ export function applyTranscriptCorrections(
 }
 
 /**
+ * Correct one word without changing word timing or discarding manually edited
+ * sentence boundaries. Sentence text is rebuilt from the corrected words that
+ * overlap each existing boundary; boundaries with no words retain their text.
+ */
+export function applyTranscriptWordTextCorrection(
+  original: TranscriptDocument,
+  current: TranscriptDocument,
+  wordIndex: number,
+  correctedText: string,
+): { original: TranscriptDocument; corrected: TranscriptDocument } {
+  if (original.origin === "user_corrected") {
+    throw new Error("Original transcript must remain model/stub output");
+  }
+  if (current.sessionId !== original.sessionId) {
+    throw new Error("Transcript revisions must belong to the same session");
+  }
+  if (!Number.isInteger(wordIndex) || wordIndex < 0 || wordIndex >= current.words.length) {
+    throw new Error("Transcript word index is out of range");
+  }
+  const text = correctedText.trim();
+  if (!text) throw new Error("Transcript word text cannot be empty");
+  const words = current.words.map((word, index) =>
+    index === wordIndex ? { ...word, text } : word,
+  );
+  const sentences = current.sentences.map((sentence) => {
+    const sentenceWords = words.filter(
+      (word) => word.startUs < sentence.endUs && word.endUs > sentence.startUs,
+    );
+    return {
+      ...sentence,
+      text: sentenceWords.length
+        ? sentenceWords.map((word) => word.text).join(" ")
+        : sentence.text,
+    };
+  });
+  return {
+    original,
+    corrected: {
+      sessionId: original.sessionId,
+      modelVersion: original.modelVersion,
+      words,
+      sentences,
+      origin: "user_corrected",
+      updatedAt: new Date().toISOString(),
+    },
+  };
+}
+
+/**
  * Replace sentence boundaries without mutating the original ASR document.
  * Boundaries are sorted and reindexed; overlaps are rejected because they make
  * review markers and sentence-level metrics ambiguous.

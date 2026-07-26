@@ -27,6 +27,7 @@ const storedSessionSchema = z.object({
   speakingWindows: z.array(speakingWindowSchema).optional(),
   transcript: transcriptDocumentSchema.optional(),
   correctedTranscript: transcriptDocumentSchema.optional(),
+  transcriptRevisions: z.array(transcriptDocumentSchema).optional(),
   media: z.instanceof(Blob).optional(),
 });
 
@@ -121,6 +122,56 @@ const preferredTranscript = <T extends {
   return browser;
 };
 
+const transcriptRevisionKey = (revision: {
+  updatedAt?: string;
+  words: Array<{ text: string; startUs: number; endUs: number }>;
+  sentences: Array<{
+    index: number;
+    text: string;
+    startUs: number;
+    endUs: number;
+  }>;
+}): string =>
+  JSON.stringify({
+    updatedAt: revision.updatedAt,
+    words: revision.words,
+    sentences: revision.sentences,
+  });
+
+const mergeTranscriptRevisions = (
+  browser: StoredSession["transcriptRevisions"],
+  native: StoredSession["transcriptRevisions"],
+): StoredSession["transcriptRevisions"] => {
+  if (!browser) return native;
+  if (!native) return browser;
+  const revisions = new Map(
+    [...native, ...browser].map((revision) => [
+      transcriptRevisionKey(revision),
+      revision,
+    ]),
+  );
+  return [...revisions.values()].sort((first, second) =>
+    (first.updatedAt ?? "").localeCompare(second.updatedAt ?? ""),
+  );
+};
+
+export function appendTranscriptRevision(
+  session: StoredSession,
+  corrected: NonNullable<StoredSession["correctedTranscript"]>,
+): StoredSession {
+  if (corrected.origin !== "user_corrected") {
+    throw new Error("Transcript revision must be user-corrected");
+  }
+  return {
+    ...session,
+    correctedTranscript: corrected,
+    transcriptRevisions: [
+      ...(session.transcriptRevisions ?? []),
+      corrected,
+    ],
+  };
+}
+
 export function mergeStoredSessions(
   browserSessions: StoredSession[],
   nativeSessions: StoredSession[] = [],
@@ -155,6 +206,10 @@ export function mergeStoredSessions(
       correctedTranscript: preferredTranscript(
         browser.correctedTranscript,
         native.correctedTranscript,
+      ),
+      transcriptRevisions: mergeTranscriptRevisions(
+        browser.transcriptRevisions,
+        native.transcriptRevisions,
       ),
       calibrationSnapshot:
         browser.calibrationSnapshot ?? native.calibrationSnapshot,

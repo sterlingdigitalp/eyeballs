@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { stubTranscript } from "../../coaching/src/speaking";
 import {
   applyTranscriptCorrections,
+  applyTranscriptWordTextCorrection,
   applySentenceBoundaryCorrections,
   liveCoachingMustNotAwaitAsr,
   materializeTranscript,
@@ -59,6 +60,84 @@ describe("transcription materialization", () => {
     expect(corrected.sentences.map((sentence) => sentence.text)).toEqual([
       "First.",
       "Second.",
+    ]);
+  });
+
+  it("corrects word text without changing timing or manual sentence boundaries", () => {
+    const original = materializeTranscript("s-word", {
+      status: "succeeded",
+      modelVersion: "local-asr/test",
+      words: [
+        { text: "Hello", startUs: 0, endUs: 200_000 },
+        { text: "world.", startUs: 200_000, endUs: 400_000 },
+      ],
+    });
+    const manuallyBounded = applySentenceBoundaryCorrections(original, [
+      {
+        index: 0,
+        startUs: 0,
+        endUs: 500_000,
+        text: "Hello world.",
+      },
+    ]).corrected;
+    const { corrected } = applyTranscriptWordTextCorrection(
+      original,
+      manuallyBounded,
+      1,
+      "team.",
+    );
+
+    expect(original.words[1].text).toBe("world.");
+    expect(corrected.words[1]).toEqual({
+      text: "team.",
+      startUs: 200_000,
+      endUs: 400_000,
+    });
+    expect(corrected.sentences).toEqual([
+      {
+        index: 0,
+        startUs: 0,
+        endUs: 500_000,
+        text: "Hello team.",
+      },
+    ]);
+  });
+
+  it("rejects empty or out-of-range word corrections", () => {
+    const original = materializeTranscript("s-word-invalid", {
+      status: "succeeded",
+      words: [{ text: "Hello", startUs: 0, endUs: 200_000 }],
+    });
+    expect(() =>
+      applyTranscriptWordTextCorrection(original, original, 0, " "),
+    ).toThrow(/empty/);
+    expect(() =>
+      applyTranscriptWordTextCorrection(original, original, 1, "Hi"),
+    ).toThrow(/range/);
+  });
+
+  it("does not duplicate a boundary-adjacent word into the next sentence", () => {
+    const original = materializeTranscript("s-word-boundary", {
+      status: "succeeded",
+      words: [
+        { text: "First.", startUs: 0, endUs: 500_000 },
+        { text: "Second.", startUs: 500_000, endUs: 1_000_000 },
+      ],
+    });
+    const manuallyBounded = applySentenceBoundaryCorrections(original, [
+      { index: 0, startUs: 0, endUs: 500_000, text: "First." },
+      { index: 1, startUs: 500_000, endUs: 1_000_000, text: "Second." },
+    ]).corrected;
+    const { corrected } = applyTranscriptWordTextCorrection(
+      original,
+      manuallyBounded,
+      1,
+      "Next.",
+    );
+
+    expect(corrected.sentences.map((sentence) => sentence.text)).toEqual([
+      "First.",
+      "Next.",
     ]);
   });
 

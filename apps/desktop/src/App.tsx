@@ -22,6 +22,7 @@ import type {
   SentenceBoundary,
   SessionManifest,
   TranscriptDocument,
+  TranscriptWord,
 } from "../../../packages/contracts/src";
 import {
   gazePredictionSchema,
@@ -91,7 +92,9 @@ import {
 } from "../../../packages/coaching/src";
 import {
   applySentenceBoundaryCorrections,
+  applyTranscriptWordTextCorrection,
   attachDatasetIntent,
+  detectSpeechStructure,
   evaluatePreflight,
   materializeTranscript,
   proposeSegments,
@@ -131,6 +134,7 @@ import {
   suggestProfiles,
 } from "./lib/devices";
 import { store, type StoredSession } from "./lib/store";
+import { appendTranscriptRevision } from "./lib/session-store";
 import { sampleVideoBrightness, type BrightnessAssessment } from "./lib/frame-quality";
 import { audioMeterPercent, rmsDbfs } from "./lib/audio-level";
 import { promptPlacementIssue as getPromptPlacementIssue } from "./lib/display-placement";
@@ -2365,6 +2369,8 @@ function Review({
     text: "",
   });
   const [editingSentenceIndex, setEditingSentenceIndex] = useState<number>();
+  const [editingWordIndex, setEditingWordIndex] = useState<number>();
+  const [wordDraft, setWordDraft] = useState("");
   const [transcriptError, setTranscriptError] = useState<string>();
   const [transcriptNotice, setTranscriptNotice] = useState<string>();
   const [clipDraft, setClipDraft] = useState({
@@ -2377,6 +2383,17 @@ function Review({
   const selected = sessions.find((session) => session.manifest.id === selectedId) ?? sessions[0];
   const effectiveTranscript =
     selected?.correctedTranscript ?? selected?.transcript;
+  const speechStructureAnalysis = useMemo(
+    () =>
+      selected && effectiveTranscript
+        ? detectSpeechStructure(
+            selected.manifest.id,
+            effectiveTranscript.words,
+            selected.speakingWindows,
+          )
+        : undefined,
+    [effectiveTranscript, selected],
+  );
   const reviewOriginUs =
     selected?.manifest.media?.monotonicStartUs ??
     selected?.manifest.monotonicStartUs ??
@@ -2480,6 +2497,8 @@ function Review({
     setBookmarkError(undefined);
     setSentenceDraft({ start: "0", end: "1", text: "" });
     setEditingSentenceIndex(undefined);
+    setEditingWordIndex(undefined);
+    setWordDraft("");
     setTranscriptError(undefined);
     setTranscriptNotice(undefined);
     setClipDraft({ start: "0", end: "1", note: "" });
@@ -2637,6 +2656,8 @@ function Review({
       reviewClips: selected.reviewClips ?? [],
       transcript: selected.transcript,
       correctedTranscript: selected.correctedTranscript,
+      transcriptRevisions: selected.transcriptRevisions ?? [],
+      speechStructureAnalysis,
     });
   };
 
@@ -2759,11 +2780,10 @@ function Review({
         sentences,
         effectiveTranscript?.words ?? original.words,
       );
-      const updated: StoredSession = {
+      const updated = appendTranscriptRevision({
         ...selected,
         transcript: original,
-        correctedTranscript: corrected,
-      };
+      }, corrected);
       await store.sessions.put(updated);
       onUpdated(updated);
       setTranscriptError(undefined);
@@ -2813,11 +2833,10 @@ function Review({
           modelVersion: parsed.modelVersion,
           updatedAt: parsed.updatedAt ?? new Date().toISOString(),
         };
-        updated = {
+        updated = appendTranscriptRevision({
           ...selected,
           transcript: original,
-          correctedTranscript: corrected,
-        };
+        }, corrected);
       } else {
         updated = {
           ...selected,
@@ -2826,6 +2845,7 @@ function Review({
             updatedAt: parsed.updatedAt ?? new Date().toISOString(),
           },
           correctedTranscript: undefined,
+          transcriptRevisions: undefined,
         };
       }
       await store.sessions.put(updated);
@@ -2917,6 +2937,53 @@ function Review({
       }
     } catch {
       // The persistence helper exposes a user-readable validation error.
+    }
+  };
+
+  const editTranscriptWord = (word: TranscriptWord, wordIndex: number) => {
+    setEditingWordIndex(wordIndex);
+    setWordDraft(word.text);
+    setTranscriptError(undefined);
+    setTranscriptNotice(undefined);
+  };
+
+  const saveTranscriptWord = async () => {
+    if (
+      !selected ||
+      !effectiveTranscript ||
+      editingWordIndex === undefined
+    ) {
+      return;
+    }
+    try {
+      const original =
+        selected.transcript ??
+        materializeTranscript(selected.manifest.id, {
+          status: "absent",
+          error: "manual_word_review_before_asr",
+        });
+      const { corrected } = applyTranscriptWordTextCorrection(
+        original,
+        effectiveTranscript,
+        editingWordIndex,
+        wordDraft,
+      );
+      const updated = appendTranscriptRevision({
+        ...selected,
+        transcript: original,
+      }, corrected);
+      await store.sessions.put(updated);
+      onUpdated(updated);
+      setEditingWordIndex(undefined);
+      setWordDraft("");
+      setTranscriptError(undefined);
+      setTranscriptNotice("Word text corrected; timing and original evidence were preserved.");
+    } catch (cause) {
+      setTranscriptError(
+        `Word correction could not be saved: ${
+          cause instanceof Error ? cause.message : String(cause)
+        }`,
+      );
     }
   };
 
@@ -3132,6 +3199,9 @@ function Review({
                 {selected.correctedTranscript
                   ? " Original transcript evidence is preserved separately."
                   : ""}
+                {(selected.transcriptRevisions?.length ?? 0) > 0
+                  ? ` ${selected.transcriptRevisions?.length} correction revisions retained.`
+                  : ""}
               </p>
               <label>
                 Import timestamped transcript JSON
@@ -3141,6 +3211,133 @@ function Review({
                   onChange={(event) => void loadTranscript(event.target.files?.[0])}
                 />
               </label>
+              <details className="profile-editor">
+                <summary>
+                  Edit timestamped words ({effectiveTranscript?.words.length ?? 0})
+                </summary>
+                {(effectiveTranscript?.words ?? []).length ? (
+                  (effectiveTranscript?.words ?? []).map((word, wordIndex) => (
+                    <div
+                      className="cue-rating-row"
+                      key={`${word.startUs}-${wordIndex}`}
+                    >
+                      {editingWordIndex === wordIndex ? (
+                        <>
+                          <label>
+                            Word at {(word.startUs / 1_000_000).toFixed(2)}s
+                            <input
+                              value={wordDraft}
+                              maxLength={500}
+                              autoFocus
+                              onChange={(event) => setWordDraft(event.target.value)}
+                              onKeyDown={(event) => {
+                                if (event.key === "Enter") {
+                                  event.preventDefault();
+                                  void saveTranscriptWord();
+                                }
+                              }}
+                            />
+                          </label>
+                          <div className="button-row">
+                            <button
+                              type="button"
+                              disabled={!wordDraft.trim()}
+                              onClick={() => void saveTranscriptWord()}
+                            >
+                              Save word
+                            </button>
+                            <button
+                              type="button"
+                              className="secondary"
+                              onClick={() => {
+                                setEditingWordIndex(undefined);
+                                setWordDraft("");
+                              }}
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <button
+                            type="button"
+                            className="text-button"
+                            onClick={() => seekToTimelineUs(word.startUs)}
+                          >
+                            {(word.startUs / 1_000_000).toFixed(2)}–
+                            {(word.endUs / 1_000_000).toFixed(2)}s · {word.text}
+                          </button>
+                          <button
+                            type="button"
+                            className="secondary"
+                            onClick={() => editTranscriptWord(word, wordIndex)}
+                          >
+                            Edit word
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  ))
+                ) : (
+                  <p className="muted">
+                    Import timestamped worker output before editing individual words.
+                  </p>
+                )}
+              </details>
+              {(selected.transcriptRevisions?.length ?? 0) > 0 && (
+                <details className="profile-editor">
+                  <summary>
+                    Correction history ({selected.transcriptRevisions?.length})
+                  </summary>
+                  {(selected.transcriptRevisions ?? []).map((revision, index) => (
+                    <p
+                      className="muted"
+                      key={`${revision.updatedAt ?? "revision"}-${index}`}
+                    >
+                      Revision {index + 1} ·{" "}
+                      {revision.updatedAt
+                        ? new Date(revision.updatedAt).toLocaleString()
+                        : "time unavailable"}{" "}
+                      · {revision.words.length} words · {revision.sentences.length} sentences
+                    </p>
+                  ))}
+                </details>
+              )}
+              {speechStructureAnalysis && (
+                <details className="profile-editor">
+                  <summary>
+                    Speech review candidates ({speechStructureAnalysis.events.length})
+                  </summary>
+                  <p className="muted">
+                    {speechStructureAnalysis.version}. These timestamp-based hints
+                    require human review; they never rewrite the transcript.
+                  </p>
+                  {speechStructureAnalysis.events.map((event) => (
+                    <div className="cue-rating-row" key={event.id}>
+                      <button
+                        type="button"
+                        className="text-button"
+                        onClick={() => seekToTimelineUs(event.startUs)}
+                      >
+                        {(event.startUs / 1_000_000).toFixed(2)}–
+                        {(event.endUs / 1_000_000).toFixed(2)}s ·{" "}
+                        {event.kind.replaceAll("_", " ")}
+                      </button>
+                      <span className="muted">
+                        {Math.round(event.confidence * 100)}% ·{" "}
+                        {event.evidence.join(" · ")}
+                      </span>
+                    </div>
+                  ))}
+                  {speechStructureAnalysis.events.length === 0 && (
+                    <p className="muted">
+                      No pause, retake, false-start, or interruption candidates
+                      were detected.
+                    </p>
+                  )}
+                </details>
+              )}
               <div className="correction-form">
                 <label>
                   Start (s)
