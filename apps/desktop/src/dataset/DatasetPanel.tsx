@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type {
+  AnalysisJob,
   ClipCandidate,
   ConsentRecord,
   RecordingAsset,
@@ -7,10 +8,12 @@ import type {
 import {
   buildCoverageReport,
   buildExportPackage,
+  applyCaptureSealToManifest,
   createDatasetVersion,
   createVersionExcludingRevoked,
   downloadExportPackage,
   findNearDuplicates,
+  ingestCaptureCoreSeal,
   isSha256Hex,
   verifyExportPackage,
   type DatasetVersionManifest,
@@ -22,11 +25,19 @@ export function DatasetPanel({
   consents,
   clips,
   assets,
+  analysisJobs,
+  onAssetsChange,
+  onAnalysisJobsChange,
+  onSessionUpdated,
 }: {
   sessions: StoredSession[];
   consents: ConsentRecord[];
   clips: ClipCandidate[];
   assets: RecordingAsset[];
+  analysisJobs: AnalysisJob[];
+  onAssetsChange: (assets: RecordingAsset[]) => void;
+  onAnalysisJobsChange: (jobs: AnalysisJob[]) => void;
+  onSessionUpdated: (session: StoredSession) => void;
 }) {
   const [versions, setVersions] = useState<DatasetVersionManifest[]>([]);
   const [message, setMessage] = useState<string>();
@@ -76,6 +87,57 @@ export function DatasetPanel({
     [clips, sessions],
   );
 
+  const importCaptureSeal = async (file: File | undefined) => {
+    if (!file) return;
+    try {
+      const ingestion = ingestCaptureCoreSeal(JSON.parse(await file.text()));
+      const nextAssets = [
+        ...ingestion.assets,
+        ...assets.filter(
+          (asset) =>
+            !ingestion.assets.some((incoming) => incoming.id === asset.id),
+        ),
+      ];
+      const nextJobs = [
+        ...ingestion.jobs,
+        ...analysisJobs.filter(
+          (job) => !ingestion.jobs.some((incoming) => incoming.id === job.id),
+        ),
+      ];
+      await Promise.all([
+        store.recordingAssets.putAll(nextAssets),
+        store.analysisJobs.putAll(nextJobs),
+      ]);
+      onAssetsChange(nextAssets);
+      onAnalysisJobsChange(nextJobs);
+
+      const source = sessions.find(
+        (session) => session.manifest.id === ingestion.sessionId,
+      );
+      if (source) {
+        const updated = {
+          ...source,
+          manifest: applyCaptureSealToManifest(source.manifest, ingestion),
+        };
+        await store.sessions.put(updated);
+        onSessionUpdated(updated);
+        setMessage(
+          `Ingested sealed CaptureCore session ${ingestion.sessionId.slice(0, 8)} · ${ingestion.assets.length} immutable masters · ${ingestion.jobs.length} analysis jobs.`,
+        );
+      } else {
+        setMessage(
+          `Ingested ${ingestion.assets.length} sealed masters and ${ingestion.jobs.length} jobs. Session metadata ${ingestion.sessionId.slice(0, 8)} is not present on this branch yet; assets remain safely staged by session ID.`,
+        );
+      }
+    } catch (cause) {
+      setMessage(
+        `CaptureCore seal rejected: ${
+          cause instanceof Error ? cause.message : String(cause)
+        }`,
+      );
+    }
+  };
+
   return (
     <section className="screen" data-dataset-export="true">
       <div className="screen-copy">
@@ -85,6 +147,47 @@ export function DatasetPanel({
           Immutable manifests with lineage. Export downloads a JSON archive with real SHA-256 file
           digests. Coaching works without dataset mode.
         </p>
+      </div>
+      <div className="panel">
+        <h2>CaptureCore intake</h2>
+        <p className="muted">
+          Import a completed <code>session-seal.json</code>. Paths must remain
+          confined to the sealed session root; dry runs, failed exits, empty
+          segments, and non-SHA-256 seals are rejected.
+        </p>
+        <label>
+          CaptureCore session seal
+          <input
+            type="file"
+            accept="application/json,.json"
+            onChange={(event) =>
+              void importCaptureSeal(event.target.files?.[0])
+            }
+          />
+        </label>
+        <p className="muted">
+          {assets.length} recording assets · {analysisJobs.length} analysis jobs
+          ·{" "}
+          {
+            analysisJobs.filter((job) => job.status === "succeeded").length
+          }{" "}
+          already satisfied
+        </p>
+        {analysisJobs.length > 0 && (
+          <details>
+            <summary>Analysis dependency graph</summary>
+            {analysisJobs.map((job) => (
+              <p className="muted" key={job.id}>
+                {job.kind} · {job.status} · depends on{" "}
+                {job.dependsOnJobIds.length
+                  ? job.dependsOnJobIds
+                      .map((id) => id.replace(`${job.sessionId}-`, ""))
+                      .join(", ")
+                  : "sealed masters"}
+              </p>
+            ))}
+          </details>
+        )}
       </div>
       <div className="panel">
         <h2>Coverage</h2>

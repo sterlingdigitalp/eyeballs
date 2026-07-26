@@ -18,7 +18,7 @@ button { cursor: pointer; }
 .brand { color: #f2faf5; text-decoration: none; font-size: 18px; font-weight: 700; }
 .brand span { color: var(--mint); margin-right: 9px; }
 nav { display: flex; gap: 5px; background: #0d1916; padding: 5px; border: 1px solid var(--line); border-radius: 12px; }
-nav button { color: var(--muted); background: transparent; border: 0; padding: 8px 15px; border-radius: 8px; }
+nav button { color: var(--muted); background: transparent; border: 0; padding: 8px 12px; border-radius: 8px; }
 nav button.active { background: #1a2b26; color: white; }
 .privacy { justify-self: end; color: var(--muted); font-size: 13px; }
 .privacy i { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--mint); margin-right: 7px; box-shadow: 0 0 10px var(--mint); }
@@ -90,6 +90,22 @@ h2 { font-size: 16px; font-weight: 600; margin: 0 0 16px; }
   color: #e8f2ec;
   padding: 10px 12px;
 }
+.provider-json {
+  width: 100%;
+  resize: vertical;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #0d1916;
+  color: #e8f2ec;
+  padding: 12px;
+  font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.readiness-list { display: grid; gap: 8px; }
+.readiness-list p { margin: 0; padding: 9px 11px; border: 1px solid var(--line); border-radius: 9px; font-size: 13px; }
+.readiness-list .ready { border-color: #3e715e; background: #10251e; }
+.readiness-list .blocked { border-color: #69463f; background: #261713; color: #d9b8ae; }
+.readiness-list strong { display: inline-block; min-width: 48px; color: var(--mint); font-size: 11px; letter-spacing: .08em; }
+.readiness-list .blocked strong { color: #df826f; }
 .train-active-chrome { display: grid; gap: 12px; margin-top: 12px; }
 .countdown-display { font-size: 28px; font-weight: 700; color: var(--mint); margin: 0; }
 .emergency-stop { background: #df826f; color: #1a0906; }

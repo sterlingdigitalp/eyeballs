@@ -422,6 +422,8 @@ export const analysisJobSchema = z.object({
   id: z.string().min(1),
   sessionId: z.string().min(1),
   kind: z.enum(analysisJobKinds),
+  /** Explicit DAG edges; workers may start only after these jobs succeed. */
+  dependsOnJobIds: z.array(z.string().min(1)).default([]),
   status: z.enum(jobStatuses),
   progress: z.number().min(0).max(1).default(0),
   workerId: z.string().optional(),

@@ -1,6 +1,7 @@
 import { openDB, type DBSchema, type IDBPDatabase } from "idb";
 import { invoke } from "@tauri-apps/api/core";
 import type {
+  AnalysisJob,
   Calibration,
   AudioIssueAnnotation,
   CaptureProfile,
@@ -14,18 +15,21 @@ import type {
   RecommendationFeedback,
   ReviewBookmark,
   ReviewClip,
+  RecordingAsset,
   SessionManifest,
   FeatureVector,
   SpeakingWindowRecord,
   TranscriptDocument,
 } from "../../../../packages/contracts/src";
 import {
+  analysisJobSchema,
   calibrationSchema,
   captureProfileSchema,
   clipCandidateSchema,
   consentRecordSchema,
   drillDefinitionSchema,
   recommendationFeedbackSchema,
+  recordingAssetSchema,
 } from "../../../../packages/contracts/src";
 import {
   mergeStoredSessions,
@@ -116,6 +120,8 @@ const SETTINGS_CLIPS = "datasetClips";
 const SETTINGS_RECOMMENDATIONS = "recommendationFeedback";
 const SETTINGS_DATASET_VERSIONS = "datasetVersions";
 const SETTINGS_CUSTOM_DRILLS = "customDrills";
+const SETTINGS_RECORDING_ASSETS = "recordingAssets";
+const SETTINGS_ANALYSIS_JOBS = "analysisJobs";
 
 export const store = {
   profiles: {
@@ -281,6 +287,32 @@ export const store = {
     putAll: async (versions: unknown[]) => {
       await store.settings.put(SETTINGS_DATASET_VERSIONS, versions);
       await nativePut(SETTINGS_DATASET_VERSIONS, "all", versions);
+    },
+  },
+  recordingAssets: {
+    all: async (): Promise<RecordingAsset[]> => {
+      const raw =
+        (await nativeGet<unknown[]>(SETTINGS_RECORDING_ASSETS, "all")) ??
+        (await store.settings.get<unknown[]>(SETTINGS_RECORDING_ASSETS)) ??
+        [];
+      return parseRecordList(recordingAssetSchema, raw, "recording asset");
+    },
+    putAll: async (assets: RecordingAsset[]) => {
+      await store.settings.put(SETTINGS_RECORDING_ASSETS, assets);
+      await nativePut(SETTINGS_RECORDING_ASSETS, "all", assets);
+    },
+  },
+  analysisJobs: {
+    all: async (): Promise<AnalysisJob[]> => {
+      const raw =
+        (await nativeGet<unknown[]>(SETTINGS_ANALYSIS_JOBS, "all")) ??
+        (await store.settings.get<unknown[]>(SETTINGS_ANALYSIS_JOBS)) ??
+        [];
+      return parseRecordList(analysisJobSchema, raw, "analysis job");
+    },
+    putAll: async (jobs: AnalysisJob[]) => {
+      await store.settings.put(SETTINGS_ANALYSIS_JOBS, jobs);
+      await nativePut(SETTINGS_ANALYSIS_JOBS, "all", jobs);
     },
   },
 };

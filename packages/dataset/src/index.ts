@@ -1,5 +1,6 @@
 export * from "./consent";
 export * from "./capture";
+export * from "./capture-seal";
 export * from "./av-sync";
 export * from "./preflight";
 export * from "./finalize";
@@ -12,5 +13,6 @@ export * from "./curation";
 export * from "./coverage";
 export * from "./duplicates";
 export * from "./versioning";
+export * from "./presenter-twin-experiment";
 export * from "./sha256";
 export * from "./export-download";

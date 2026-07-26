@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
+  AnalysisJob,
   AudioIssueAnnotation,
   Calibration,
   CalibrationTarget,
@@ -125,6 +126,7 @@ import { LiveAssistHud } from "./coaching/LiveAssistHud";
 import { ConsentPanel } from "./dataset/ConsentPanel";
 import { CuratePanel } from "./dataset/CuratePanel";
 import { DatasetPanel } from "./dataset/DatasetPanel";
+import { PresenterTwinPanel } from "./dataset/PresenterTwinPanel";
 import {
   describeMediaError,
   enumerateDevices,
@@ -176,7 +178,8 @@ type Page =
   | "progress"
   | "consent"
   | "curate"
-  | "dataset";
+  | "dataset"
+  | "proof";
 const NO_MICROPHONE_ID = "__none__";
 const SESSION_CHECKPOINT_INTERVAL_US = 5_000_000;
 const VIDEO_MODE_OPTIONS: Array<{
@@ -3966,7 +3969,8 @@ export default function App() {
   }>({ recording: false, liveAssist: false });
   const [consents, setConsents] = useState<ConsentRecord[]>([]);
   const [datasetClips, setDatasetClips] = useState<ClipCandidate[]>([]);
-  const [datasetAssets] = useState<RecordingAsset[]>([]);
+  const [datasetAssets, setDatasetAssets] = useState<RecordingAsset[]>([]);
+  const [analysisJobs, setAnalysisJobs] = useState<AnalysisJob[]>([]);
   const [pendingDrillId, setPendingDrillId] = useState<string>();
   const [pendingFollowedRecommendationId, setPendingFollowedRecommendationId] =
     useState<string>();
@@ -4044,9 +4048,20 @@ export default function App() {
       store.sessions.all(),
       store.consents.all(),
       store.clips.all(),
-    ]).then(async ([, storedSessions, storedConsents, storedClips]) => {
+      store.recordingAssets.all(),
+      store.analysisJobs.all(),
+    ]).then(async ([
+      ,
+      storedSessions,
+      storedConsents,
+      storedClips,
+      storedAssets,
+      storedAnalysisJobs,
+    ]) => {
       setConsents(storedConsents);
       setDatasetClips(storedClips);
+      setDatasetAssets(storedAssets);
+      setAnalysisJobs(storedAnalysisJobs);
       const recovered = await Promise.all(storedSessions.map(async (session) => {
         const recovered = recoverInterruptedSession(session);
         if (recovered.changed) {
@@ -4357,10 +4372,15 @@ export default function App() {
               "consent",
               "curate",
               "dataset",
+              "proof",
             ] as Page[]
           ).map((item) => (
             <button className={page === item ? "active" : ""} key={item} onClick={() => setPage(item)}>
-              {item === "measure" ? "Train" : item[0].toUpperCase() + item.slice(1)}
+              {item === "measure"
+                ? "Train"
+                : item === "proof"
+                  ? "Twin proof"
+                  : item[0].toUpperCase() + item.slice(1)}
             </button>
           ))}
         </nav>
@@ -4469,6 +4489,17 @@ export default function App() {
         <DatasetPanel
           sessions={sessions}
           consents={consents}
+          clips={datasetClips}
+          assets={datasetAssets}
+          analysisJobs={analysisJobs}
+          onAssetsChange={setDatasetAssets}
+          onAnalysisJobsChange={setAnalysisJobs}
+          onSessionUpdated={upsertSession}
+        />
+      )}
+      {page === "proof" && (
+        <PresenterTwinPanel
+          sessions={sessions}
           clips={datasetClips}
           assets={datasetAssets}
         />

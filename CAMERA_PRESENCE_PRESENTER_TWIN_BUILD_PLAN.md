@@ -3,7 +3,7 @@ title: "Camera Presence Coach & Presenter Twin — Complete Build Plan"
 version: "1.1"
 date: "2026-07-25"
 last_progress_update: "2026-07-26"
-status: "Phase 1 engineering largely complete, with top-monitor Brio calibration/classification reopened by live evidence; Phase 2 integrated coaching prototype under MVP hardening; Phase 3 domain scaffolding/UI prototype on this branch. CaptureCore is implemented through Stage 5 on feature/capture-core; its first Brio+Yeti one-hour Stage 6 soak passed"
+status: "Phase 1 engineering largely complete, with top-monitor Brio calibration/classification reopened by live evidence; Phase 2 integrated coaching prototype under MVP hardening; Phase 3 now accepts CaptureCore seals and persists the downstream job graph. CaptureCore Stage 6 acceptance is in progress after a passing one-hour Brio+Yeti soak. Phase 4 controlled-proof contracts and readiness UI have begun"
 platform_priority: "macOS first, local-first"
 working_product_name: "Camera Presence Coach"
 ---
@@ -2274,20 +2274,44 @@ Out of scope:
 - autonomous cloud upload;
 - automatic training on all approved assets.
 
+### 13.2.1 Implementation status — 2026-07-26
+
+The Dataset Engine now has an explicit boundary with the independently developed
+CaptureCore:
+
+- completed `session-seal.json` records are schema-validated before ingestion;
+- cancelled, failed, nonzero-exit, dry-run, empty, path-escaping, duplicate, or
+  non-SHA-256 inputs are rejected;
+- sealed video/audio segments become immutable recording assets with CaptureCore
+  SHA-256, byte length, codec/PCM, and first-PTS lineage preserved;
+- the matching session manifest receives honest duration, measured frame rate,
+  dropped-frame count, media size, and initial A/V offset;
+- ingestion persists a deterministic dependency graph for validation, proxy,
+  analysis-audio, transcription, offline-face, quality, and segmentation work;
+- hash work is marked satisfied only because the seal identifies Rust `sha2` as
+  its authority; all derivative workers remain pending until they produce and
+  validate their own outputs;
+- the Dataset screen exposes seal intake and the resulting job dependencies.
+
+CaptureCore's first one-hour Brio 4K + Yeti soak passed with zero reported video
+drops and all 690 closed files decodable. The separate CaptureCore Stage 6
+matrix, including its second one-hour profile soak and adverse-condition rows,
+remains the capture release gate.
+
 ### 13.3 Work package P3-A — Production CaptureCore
 
 Tasks:
 
-- [ ] Establish one camera/microphone owner.
-- [ ] Support built-in and Studio profiles.
-- [ ] Record master video with actual negotiated settings.
-- [ ] Record raw/minimally processed Yeti audio separately where appropriate.
-- [ ] Generate live preview and analysis frames without degrading master quality.
-- [ ] Timestamp video and audio from capture time.
-- [ ] Write periodic recovery checkpoints.
+- [x] Establish one camera/microphone owner.
+- [x] Support built-in and Studio profiles.
+- [x] Record master video with actual negotiated settings.
+- [x] Record raw/minimally processed Yeti audio separately where appropriate.
+- [x] Generate live preview frames without degrading master quality; full-rate analysis frames remain a downstream-worker concern.
+- [x] Timestamp video and audio from capture time.
+- [x] Write periodic recovery checkpoints through finalized segment boundaries.
 - [ ] Detect dropped frames, audio discontinuity, encoder backpressure, and disk pressure.
-- [ ] Finalize media atomically.
-- [ ] Validate duration, streams, decodability, and hashes before marking complete.
+- [x] Finalize media without falsely completing killed or interrupted sessions.
+- [x] Validate duration, streams, decodability, and hashes before marking complete.
 - [ ] Add a one-hour and multi-hour soak test.
 
 ### 13.4 Work package P3-B — Audio/video synchronization
@@ -2296,8 +2320,8 @@ External USB devices may use different clocks. Do not assume perfect long-sessio
 
 Tasks:
 
-- [ ] Record monotonic timing metadata for both streams.
-- [ ] Measure initial offset.
+- [x] Record monotonic timing metadata for both streams.
+- [x] Measure initial offset.
 - [ ] Measure drift over long captures.
 - [ ] Add an optional clap or sync phrase in studio setup tests.
 - [ ] Build post-finalization drift analysis.
@@ -2339,6 +2363,16 @@ During recording:
 - no repeated noncritical warnings that disrupt performance.
 
 ### 13.6 Work package P3-D — Media finalization pipeline
+
+Implementation note — 2026-07-26:
+
+- CaptureCore seals now materialize recording assets and the full analysis-job
+  dependency graph in the app;
+- every job has an explicit status, worker/version placeholder, input/output
+  hashes, progress, retry count, and human-readable error contract;
+- the intake bridge is complete, while the proxy, analysis-audio, local ASR,
+  offline-face, quality, and segmentation executors remain to be connected to
+  those queued jobs.
 
 Pipeline:
 
@@ -2772,6 +2806,32 @@ Out of scope:
 - real-time interactive output;
 - production voice cloning;
 - supporting many vendors before one controlled proof succeeds.
+
+### 14.2.1 Implementation status — 2026-07-26
+
+Phase 4 has begun without prematurely selecting or uploading to a provider:
+
+- versioned schemas enforce exactly one source package for Conditions A–D;
+- condition semantics reject coached baseline, multi-clip “continuous” takes,
+  unversioned curated sets, and generated real-reference substitutions;
+- all conditions must share one script hash and equivalent output controls;
+- all generated conditions must share one sealed real-voice asset;
+- the provider requirements record covers source limits, formats, segmented
+  input, separate voice, verification, retention/deletion, rights, cost,
+  provenance, and workflow;
+- experiment creation emits a content-hashed manifest plus reproducible
+  generation requests containing provider/model version, settings, candidate
+  count, and seeds;
+- the app's **Twin proof** screen audits source, clip, asset, version, script,
+  voice, and provider readiness before enabling manifest creation;
+- blind evaluation scheduling randomizes candidates, hides condition/provider
+  in its public artifact, keeps the reveal key separate, inserts repeated
+  candidates for consistency measurement, validates the 1–5 rubric, and
+  summarizes coached-versus-baseline results.
+
+No generation provider has been selected and no source has been uploaded.
+Capturing the matched A–D inputs, producing candidates, running blind review,
+and publishing the go/no-go remain empirical Phase 4 work.
 
 ### 14.3 Experimental conditions
 

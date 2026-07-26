@@ -113,6 +113,7 @@ export function createAnalysisJob(
     id: `${sessionId}-${kind}`,
     sessionId,
     kind,
+    dependsOnJobIds: [],
     status: "pending",
     progress: 0,
     inputHashes,
