@@ -66,7 +66,7 @@ Fill `Result` with PASS / FAIL / SKIP and link run dir or commit note.
 
 | # | Test | Procedure | Acceptance | Result | Evidence |
 |---|---|---|---|---|---|
-| 1 | **1h Brio 4K + Yeti soak** | `run-capture-core-soak.sh brio-yeti 3600` | exit 0; validation PASS; honest measured FPS; hashes; disk growth sane | | |
+| 1 | **1h Brio 4K + Yeti soak** | `run-capture-core-soak.sh brio-yeti 3600` | exit 0; validation PASS; honest measured FPS; hashes; disk growth sane | **PASS** | `docs/benchmarks/soaks/brio-yeti-20260726T115313Z-SUMMARY.md` · runDir `/tmp/capture-core-soak/brio-yeti-20260726T115313Z` · measured **~23.97 fps** · 345 segments · 0 drops · ~14 GiB · validation RESULT=PASS |
 | 2 | **1h MacBook + built-in mic** | `run-capture-core-soak.sh macbook 3600` | same as #1 for built-in profile | | |
 | 3 | **Segmented multi-hour** | e.g. `brio-yeti-1080` 7200–10800 after #1 | no crash; memory/handles stable; drift noted | | |
 | 4 | **Camera unplug mid open segment** | Start soak; unplug Brio mid-segment | prior segments playable; no false complete | | |
@@ -97,11 +97,12 @@ CaptureCore is production-ready when **all** are true and committed:
 
 | Condition | Scaffolding |
 |---|---|
-| Closed segment decode + hash | `validate-capture-session.sh` |
-| Honest measured FPS | `recording-finished.json` → `measuredVideoFps` + seal `capture` |
-| A/V initial offset | `avInitialOffsetUs` on finish (drift over hour still needs soak analysis) |
+| Closed segment decode + hash | `validate-capture-session.sh` (**proven** on 690 files, 1h soak) |
+| Honest measured FPS | `recording-finished.json` → `measuredVideoFps` + seal `capture` (**~24 fps** on 4K Brio soak) |
+| A/V initial offset | `avInitialOffsetUs` on finish (**53.4 ms** on 1h soak; hour-scale drift still open) |
 | Boundary continuity | **Not automated yet** — post-soak analysis of events |
-| Unattended 1h run | `run-capture-core-soak.sh` |
+| Unattended 1h run | `run-capture-core-soak.sh` (**proven**) |
+| Terminal soak seal | soak script now writes `session-seal.json` after capture |
 | Matrix document | this file |
 
 ---

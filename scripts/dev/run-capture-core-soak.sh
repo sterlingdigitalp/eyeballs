@@ -134,6 +134,66 @@ ELAPSED=$((END_EPOCH - START_EPOCH))
   echo "captureCoreExit=$EXIT"
 } | tee -a "$LOG/SOAK_START.txt"
 
+# Terminal soaks do not go through the Tauri supervisor — write session-seal.json here.
+export SESSION LOG EXIT
+if command -v python3 >/dev/null 2>&1; then
+  python3 - <<'PY' || true
+import hashlib, json, os
+from pathlib import Path
+from datetime import datetime, timezone
+
+session = Path(os.environ["SESSION"])
+finished = session / "recording-finished.json"
+segments_dir = session / "master" / "segments"
+segs = []
+if segments_dir.is_dir():
+    for p in sorted(segments_dir.iterdir()):
+        if not p.is_file():
+            continue
+        h = hashlib.sha256()
+        with p.open("rb") as f:
+            for chunk in iter(lambda: f.read(1024 * 1024), b""):
+                h.update(chunk)
+        segs.append({
+            "path": str(p),
+            "sha256": h.hexdigest(),
+            "byteLength": p.stat().st_size,
+        })
+capture = {}
+session_id = session.name
+if finished.is_file():
+    fin = json.loads(finished.read_text())
+    session_id = fin.get("sessionId") or session_id
+    for k in (
+        "negotiatedWidth", "negotiatedHeight", "negotiatedFrameRate",
+        "requestedWidth", "requestedHeight", "requestedFrameRate",
+        "measuredVideoFps", "wallDurationSec", "segmentDurationSec",
+        "videoCodec", "preferPcmAudio", "firstVideoPtsUs", "firstAudioPtsUs",
+        "avInitialOffsetUs", "videoFrames", "audioBuffers", "droppedVideo",
+        "finalizedSegments", "previewFrames", "status", "exitCode",
+    ):
+        if k in fin:
+            capture[k] = fin[k]
+exit_code = int(capture.get("exitCode", os.environ.get("EXIT", "1")))
+status = "complete" if exit_code == 0 else ("cancelled" if exit_code == 5 else "failed")
+seal = {
+    "protocolVersion": "1.0.0",
+    "sessionId": session_id,
+    "sessionRoot": str(session),
+    "exitCode": exit_code,
+    "status": status,
+    "dryRun": False,
+    "hashedBy": "python-sha256-soak",
+    "segmentCount": len(segs),
+    "segments": segs,
+    "capture": capture,
+    "writtenAt": datetime.now(timezone.utc).isoformat(),
+}
+(session / "session-seal.json").write_text(json.dumps(seal, indent=2, sort_keys=True) + "\n")
+print(f"wrote session-seal.json segments={len(segs)}")
+PY
+fi
+
 # Validate segments / seal
 set +e
 sh "$ROOT/scripts/dev/validate-capture-session.sh" "$SESSION" >"$LOG/validate.stdout" 2>"$LOG/validate.stderr"
