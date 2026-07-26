@@ -9,10 +9,14 @@ import {
 } from "../../contracts/src";
 
 import level1 from "../content/drills/level1-relaxed-lens-hold.json";
+import level1Greeting from "../content/drills/level1-greeting-introduction.json";
 import level2 from "../content/drills/level2-lens-adjacent-reading.json";
+import level2Finish from "../content/drills/level2-finish-sentence-through-lens.json";
 import level3 from "../content/drills/level3-prompted-response.json";
 import level4 from "../content/drills/level4-presentation-rehearsal.json";
+import level4Notes from "../content/drills/level4-notes-and-recover.json";
 import level5 from "../content/drills/level5-simulated-livestream.json";
+import level5Review from "../content/drills/level5-review-only-rehearsal.json";
 import level6 from "../content/drills/level6-live-assist.json";
 
 export const SCORING_POLICY_VERSION = "coaching-scoring/1.0.0";
@@ -70,7 +74,18 @@ export function drillVersionString(version: DrillDefinition["version"]): string 
   return String(version);
 }
 
-const BUILTIN_RAW: unknown[] = [level1, level2, level3, level4, level5, level6];
+const BUILTIN_RAW: unknown[] = [
+  level1,
+  level1Greeting,
+  level2,
+  level2Finish,
+  level3,
+  level4,
+  level4Notes,
+  level5,
+  level5Review,
+  level6,
+];
 
 let cachedBuiltins: DrillDefinition[] | undefined;
 
@@ -143,6 +158,7 @@ export function stampDrillOnSession(
     feedbackIntensity:
       options.feedbackIntensity ?? drill.contactPolicy.feedbackLevel,
     scoringPolicyVersion: SCORING_POLICY_VERSION,
+    drillSnapshot: drill,
     sessionGoal: options.sessionGoal,
     comfortBefore: options.comfortBefore,
     liveAssist: options.liveAssist ?? drill.liveAssist,
@@ -165,13 +181,14 @@ export function drillFromOutline(
   if (!lines.length) {
     throw new DrillValidationError("Outline is empty", ["Provide at least one prompt line"]);
   }
+  const durationTargetSec = overrides.durationTargetSec ?? 90;
   return parseDrillDefinition({
     id: overrides.id ?? `custom-outline-${Date.now()}`,
     version: 1,
     name: overrides.name ?? "Custom outline rehearsal",
     mode: "presentation_rehearsal",
     curriculumLevel: 4,
-    durationTargetSec: overrides.durationTargetSec ?? 90,
+    durationTargetSec,
     prompt: {
       type: "outline",
       text: lines[0],
@@ -195,7 +212,10 @@ export function drillFromOutline(
       speakingWindowsOnly: true,
     },
     noteAllowedIntervals: [],
-    completion: { minimumSpeakingSec: 30, minimumDurationSec: 45 },
+    completion: {
+      minimumSpeakingSec: Math.min(30, Math.round(durationTargetSec * 0.6)),
+      minimumDurationSec: Math.min(45, Math.round(durationTargetSec * 0.75)),
+    },
     reflection: ["Which outline beats pulled your eyes away?"],
     liveAssist: false,
     recordingDefault: "optional",

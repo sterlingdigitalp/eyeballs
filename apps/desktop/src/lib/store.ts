@@ -7,6 +7,7 @@ import type {
   ConsentRecord,
   Correction,
   CueEvent,
+  DrillDefinition,
   GazeEvent,
   GazePrediction,
   RecommendationFeedback,
@@ -19,6 +20,7 @@ import {
   captureProfileSchema,
   clipCandidateSchema,
   consentRecordSchema,
+  drillDefinitionSchema,
   recommendationFeedbackSchema,
 } from "../../../../packages/contracts/src";
 import {
@@ -99,6 +101,7 @@ const SETTINGS_CONSENTS = "consents";
 const SETTINGS_CLIPS = "datasetClips";
 const SETTINGS_RECOMMENDATIONS = "recommendationFeedback";
 const SETTINGS_DATASET_VERSIONS = "datasetVersions";
+const SETTINGS_CUSTOM_DRILLS = "customDrills";
 
 export const store = {
   profiles: {
@@ -175,6 +178,28 @@ export const store = {
     put: async (key: string, value: unknown) => {
       await (await db()).put("settings", value, key);
       await nativePut("settings", key, value);
+    },
+  },
+  customDrills: {
+    all: async (): Promise<DrillDefinition[]> => {
+      const raw =
+        (await nativeGet<unknown[]>(SETTINGS_CUSTOM_DRILLS, "all")) ??
+        (await store.settings.get<unknown[]>(SETTINGS_CUSTOM_DRILLS)) ??
+        [];
+      return parseRecordList(drillDefinitionSchema, raw, "custom drill");
+    },
+    putAll: async (drills: DrillDefinition[]) => {
+      await store.settings.put(SETTINGS_CUSTOM_DRILLS, drills);
+      await nativePut(SETTINGS_CUSTOM_DRILLS, "all", drills);
+    },
+    upsert: async (drill: DrillDefinition) => {
+      const existing = await store.customDrills.all();
+      const next = [
+        drill,
+        ...existing.filter((entry) => entry.id !== drill.id),
+      ];
+      await store.customDrills.putAll(next);
+      return next;
     },
   },
   consents: {

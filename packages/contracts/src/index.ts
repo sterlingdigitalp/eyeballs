@@ -297,6 +297,8 @@ export const sessionCoachingSchema = z.object({
   comfortAfter: z.number().int().min(1).max(5).optional(),
   reflectionNotes: z.array(z.string()).optional(),
   completed: z.boolean().optional(),
+  /** Immutable drill content used by this session, including custom outlines. */
+  drillSnapshot: drillDefinitionSchema.optional(),
   handsFreeAudio: z.boolean().optional(),
   audioGuidanceVersion: z.string().min(1).optional(),
   liveAssist: z.boolean().optional(),

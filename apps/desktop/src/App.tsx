@@ -58,6 +58,7 @@ import {
   contactColor,
   createTrainSession,
   defaultRecordingIntent,
+  drillFromOutline,
   emergencyStop,
   FeedbackPolicyEngine,
   finishReflection,
@@ -82,6 +83,7 @@ import {
 } from "../../../packages/dataset/src";
 import {
   DrillSetupForm,
+  CustomDrillImport,
   LensAdjacentPromptOverlay,
   ReflectionForm,
   RecordingPrivacyBadge,
@@ -1203,7 +1205,12 @@ function Measure({
     async () => undefined,
   );
   const [captureFailure, setCaptureFailure] = useState<string>();
-  const drills = useBuiltinDrills();
+  const builtinDrills = useBuiltinDrills();
+  const [customDrills, setCustomDrills] = useState<DrillDefinition[]>([]);
+  const drills = useMemo(
+    () => [...builtinDrills, ...customDrills],
+    [builtinDrills, customDrills],
+  );
   const [selectedDrillId, setSelectedDrillId] = useState(
     initialDrillId ?? drills[0]?.id ?? "",
   );
@@ -1222,6 +1229,19 @@ function Measure({
   const [outfitLabel, setOutfitLabel] = useState("");
   const [backgroundLabel, setBackgroundLabel] = useState("");
   const [preflightMessage, setPreflightMessage] = useState<string>();
+
+  useEffect(() => {
+    void store.customDrills
+      .all()
+      .then(setCustomDrills)
+      .catch((cause) => {
+        setCaptureFailure(
+          `Custom drills could not be restored: ${
+            cause instanceof Error ? cause.message : String(cause)
+          }`,
+        );
+      });
+  }, []);
 
   useEffect(() => {
     if (initialDrillId) setSelectedDrillId(initialDrillId);
@@ -1998,6 +2018,20 @@ function Measure({
               onHandsFreeAudio={setHandsFreeAudio}
               disabled={preparingAudio}
             />
+            <CustomDrillImport
+              disabled={preparingAudio}
+              onCreate={async ({ name, outline, durationTargetSec }) => {
+                const custom = drillFromOutline(outline, {
+                  id: `custom-outline-${crypto.randomUUID()}`,
+                  name,
+                  durationTargetSec,
+                });
+                const next = await store.customDrills.upsert(custom);
+                setCustomDrills(next);
+                setSelectedDrillId(custom.id);
+                setIntensity(custom.contactPolicy.feedbackLevel);
+              }}
+            />
             <div className="train-setup">
               <label>
                 Dataset intent
@@ -2319,8 +2353,10 @@ function Review({
   );
   const reviewDrillId = selected?.manifest.coaching?.drillId;
   const reviewDrill = useMemo(
-    () => (reviewDrillId ? getDrillById(reviewDrillId) : undefined),
-    [reviewDrillId],
+    () =>
+      selected?.manifest.coaching?.drillSnapshot ??
+      (reviewDrillId ? getDrillById(reviewDrillId) : undefined),
+    [reviewDrillId, selected?.manifest.coaching?.drillSnapshot],
   );
   const multiLanes = useMemo(
     () =>

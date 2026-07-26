@@ -1,0 +1,40 @@
+{
+  "id": "review-only-rehearsal-01",
+  "version": 1,
+  "name": "Three-minute review-only rehearsal",
+  "mode": "simulated_livestream",
+  "curriculumLevel": 5,
+  "durationTargetSec": 180,
+  "prompt": {
+    "type": "question",
+    "text": "Deliver an unscripted three-minute explanation without live corrections.",
+    "revealMode": "hide_on_speech",
+    "revealSec": 6,
+    "hideWhenSpeaking": true
+  },
+  "contactPolicy": {
+    "microGlanceToleranceMs": 450,
+    "reportableBreakMinMs": 900,
+    "longBreakMinMs": 2000,
+    "contactRecoveryConfirmMs": 250,
+    "feedbackCooldownMs": 5000,
+    "feedbackLevel": "review_only"
+  },
+  "scoring": {
+    "excludeFirstSec": 3,
+    "excludeLastSec": 2,
+    "sentenceBoundaryContact": true,
+    "speakingWindowsOnly": true
+  },
+  "noteAllowedIntervals": [],
+  "completion": {
+    "minimumSpeakingSec": 120,
+    "minimumDurationSec": 150
+  },
+  "reflection": [
+    "Where did contact drift without live cues?",
+    "Did the longer run feel more natural than a short drill?"
+  ],
+  "liveAssist": false,
+  "recordingDefault": "optional"
+}

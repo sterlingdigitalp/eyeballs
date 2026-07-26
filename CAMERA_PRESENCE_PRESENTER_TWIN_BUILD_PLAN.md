@@ -1958,7 +1958,9 @@ the existing coaching prototype rather than replacing it.
 
 Implemented and covered by device-free tests:
 
-- versioned drill schema and six built-in curriculum drills;
+- versioned drill schema and the complete ten-drill starter library;
+- durable plain-text/Markdown outline import with an immutable drill snapshot
+  stored on every coached session;
 - restrained feedback engine with blink/unknown suppression, cooldowns,
   evidence logs, cue ratings, and recovery handling;
 - lens-adjacent prompt width, reveal modes, and large-text mode;
@@ -1979,23 +1981,23 @@ Still requiring live validation after CaptureCore releases the Brio and Yeti:
 
 Still open for later Phase 2 slices:
 
-- four additional built-in drills plus custom prompt/outline UI;
+- custom-drill editing/deletion and richer per-beat timing controls;
 - local ASR and editable sentence alignment;
 - review zoom, keyboard navigation, bookmarks, and richer annotations;
-- rolling progress visualization and corrected recommendation usefulness flow;
+- rolling progress visualization;
 - real transparent always-on-top Tauri live-assist window and global shortcut.
 
 ### 12.3 Work package P2-A — Drill engine
 
 Tasks:
 
-- [ ] Define versioned drill schema.
-- [ ] Load built-in drills from content files rather than hard-coding UI.
-- [ ] Support duration, prompts, allowed note zones, feedback policy, scoring, and reflection prompts.
-- [ ] Validate drill files at startup and in tests.
-- [ ] Preserve drill version in each session.
-- [ ] Support custom user-authored prompts.
-- [ ] Add import from plain text or Markdown outline for presentation rehearsal.
+- [x] Define versioned drill schema.
+- [x] Load built-in drills from content files rather than hard-coding UI.
+- [x] Support duration, prompts, allowed note zones, feedback policy, scoring, and reflection prompts.
+- [x] Validate drill files at startup and in tests.
+- [x] Preserve drill version and immutable drill content in each session.
+- [x] Support custom user-authored prompts.
+- [x] Add durable import from plain text or Markdown outline for presentation rehearsal.
 
 Initial built-in drill set:
 
@@ -2014,12 +2016,12 @@ Initial built-in drill set:
 
 Tasks:
 
-- [ ] Persist lens-anchor location per display/profile.
-- [ ] Constrain prompt width near lens.
-- [ ] Support one-line reveal, phrase-by-phrase reveal, and hide-on-speech.
+- [x] Persist lens-anchor location per display/profile.
+- [x] Constrain prompt width near lens.
+- [x] Support one-line reveal, phrase-by-phrase reveal, and hide-on-speech.
 - [ ] Prevent system dialogs from covering the prompt during a session.
-- [ ] Warn when the window is moved to another display and lens geometry no longer matches.
-- [ ] Add large-text mode while preserving lens proximity.
+- [x] Warn when the window is moved to another display and lens geometry no longer matches.
+- [x] Add large-text mode while preserving lens proximity.
 - [ ] Test with MacBook built-in display and external displays.
 
 ### 12.5 Work package P2-C — Feedback policy engine
@@ -2070,27 +2072,27 @@ The live coaching loop must not wait for transcription. Sentence-boundary metric
 
 Tasks:
 
-- [ ] Build synchronized multi-lane timeline.
+- [x] Build synchronized multi-lane timeline.
 - [ ] Add zoom and keyboard navigation.
-- [ ] Click event to seek playback.
-- [ ] Show contact, near-lens, away, and unknown separately.
-- [ ] Show cue markers.
+- [x] Click event to seek playback.
+- [x] Show contact, near-lens, away, and unknown separately.
+- [x] Show cue markers.
 - [ ] Show transcript and sentence boundaries.
-- [ ] Show allowed-note intervals.
+- [x] Show allowed-note intervals.
 - [ ] Add user annotations and bookmarks.
 - [ ] Add clip in/out points, but do not yet promote automatically to a dataset.
-- [ ] Export a session report as Markdown/JSON.
+- [x] Export a session report as Markdown/JSON.
 
 ### 12.8 Work package P2-F — Progress system
 
 Tasks:
 
-- [ ] Define comparable-session grouping by drill, profile, and feedback mode.
-- [ ] Store metrics with scoring-policy version.
+- [x] Define comparable-session grouping by drill, profile, and feedback mode.
+- [x] Store metrics with scoring-policy version.
 - [ ] Show rolling trends without implying medical significance.
-- [ ] Add baseline session.
-- [ ] Add user comfort rating before/after session.
-- [ ] Highlight measurement degradation separately from performance change.
+- [x] Add baseline session.
+- [x] Add user comfort rating before/after session.
+- [x] Highlight measurement degradation separately from performance change.
 - [ ] Add session streak only if it supports practice without becoming manipulative.
 
 ### 12.9 Work package P2-G — Recommendation rules
@@ -2101,11 +2103,11 @@ Implement transparent rules first. Every recommendation should say why it was se
 
 Tasks:
 
-- [ ] Encode rules as versioned configuration.
-- [ ] Include minimum evidence requirements.
-- [ ] Prevent recommendations when tracking confidence is poor.
-- [ ] Let the user dismiss or pin a drill.
-- [ ] Record whether the recommendation was followed and useful.
+- [x] Encode rules as versioned configuration.
+- [x] Include minimum evidence requirements.
+- [x] Prevent recommendations when tracking confidence is poor.
+- [x] Let the user dismiss or pin a drill.
+- [x] Record whether the recommendation was followed and, after the resulting session, separately rate whether it was useful.
 
 ### 12.10 Work package P2-H — Live-assist HUD
 

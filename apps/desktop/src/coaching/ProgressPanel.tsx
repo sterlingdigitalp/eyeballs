@@ -5,6 +5,7 @@ import {
   groupComparableSessions,
   measurementDegradationNotes,
   recommendNext,
+  recommendationAwaitingUsefulness,
   type Recommendation,
 } from "../../../../packages/coaching/src";
 import { store, type StoredSession } from "../lib/store";
@@ -84,6 +85,30 @@ export function ProgressPanel({
   };
 
   const degradation = series.flatMap(measurementDegradationNotes);
+  const awaitingUsefulness = recommendationAwaitingUsefulness(
+    feedback,
+    sessions
+      .filter(
+        (session) =>
+          session.manifest.status === "complete" ||
+          session.manifest.status === "incomplete",
+      )
+      .flatMap((session) =>
+        session.manifest.followedRecommendationId
+          ? [session.manifest.followedRecommendationId]
+          : [],
+      ),
+  );
+
+  const rateRecommendationUsefulness = async (useful: boolean) => {
+    if (!awaitingUsefulness) return;
+    const next = await store.recommendationFeedback.upsert({
+      ...awaitingUsefulness,
+      useful,
+      updatedAt: new Date().toISOString(),
+    });
+    setFeedback(next);
+  };
 
   return (
     <section className="screen progress-screen">
@@ -126,7 +151,6 @@ export function ProgressPanel({
               onClick={() => {
                 void persistFeedback(activeRecommendation, {
                   followed: true,
-                  useful: true,
                 });
                 if (activeRecommendation.drillId) {
                   onFollowDrill?.(activeRecommendation.drillId, activeRecommendation.id);
@@ -140,6 +164,32 @@ export function ProgressPanel({
       )}
       {storedForBase?.dismissed && (
         <p className="muted">Latest recommendation dismissed (persisted).</p>
+      )}
+      {awaitingUsefulness && (
+        <div className="recommendation-card">
+          <strong>Was the followed drill useful?</strong>
+          <p>
+            You completed a session after following recommendation{" "}
+            <code>{awaitingUsefulness.recommendationId}</code>. Rate the result separately
+            from the decision to try it.
+          </p>
+          <div className="button-row">
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => void rateRecommendationUsefulness(true)}
+            >
+              Yes, useful
+            </button>
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => void rateRecommendationUsefulness(false)}
+            >
+              No, not useful
+            </button>
+          </div>
+        </div>
       )}
       {degradation.length > 0 && (
         <div className="panel">

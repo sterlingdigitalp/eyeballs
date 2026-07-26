@@ -1,0 +1,50 @@
+{
+  "id": "finish-sentence-through-lens-01",
+  "version": 1,
+  "name": "Finish through the lens",
+  "mode": "lens_adjacent_reading",
+  "curriculumLevel": 2,
+  "durationTargetSec": 50,
+  "prompt": {
+    "type": "text",
+    "text": "Read each opening, then finish the sentence while looking into the lens.",
+    "phrases": [
+      "The most useful lesson I learned was…",
+      "The change I want people to remember is…",
+      "The next step I recommend is…"
+    ],
+    "revealMode": "phrase_by_phrase",
+    "revealSec": 12,
+    "hideWhenSpeaking": true
+  },
+  "contactPolicy": {
+    "microGlanceToleranceMs": 700,
+    "reportableBreakMinMs": 1000,
+    "longBreakMinMs": 2200,
+    "contactRecoveryConfirmMs": 250,
+    "feedbackCooldownMs": 3500,
+    "feedbackLevel": "standard",
+    "noteAllowedNearLensMs": 1000
+  },
+  "scoring": {
+    "excludeFirstSec": 2,
+    "excludeLastSec": 0,
+    "sentenceBoundaryContact": true,
+    "speakingWindowsOnly": true
+  },
+  "noteAllowedIntervals": [
+    { "startSec": 0, "endSec": 5, "label": "Read opening" },
+    { "startSec": 12, "endSec": 17, "label": "Read opening" },
+    { "startSec": 24, "endSec": 29, "label": "Read opening" }
+  ],
+  "completion": {
+    "minimumSpeakingSec": 18,
+    "minimumDurationSec": 36
+  },
+  "reflection": [
+    "Did you return to the lens before completing each thought?",
+    "Which sentence opening caused the longest glance?"
+  ],
+  "liveAssist": false,
+  "recordingDefault": "optional"
+}

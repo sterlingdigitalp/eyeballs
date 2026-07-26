@@ -151,6 +151,99 @@ export function DrillSetupForm({
   );
 }
 
+export interface CustomOutlineInput {
+  name: string;
+  outline: string;
+  durationTargetSec: number;
+}
+
+export function CustomDrillImport({
+  onCreate,
+  disabled,
+}: {
+  onCreate: (input: CustomOutlineInput) => Promise<void>;
+  disabled?: boolean;
+}) {
+  const [name, setName] = useState("");
+  const [outline, setOutline] = useState("");
+  const [durationTargetSec, setDurationTargetSec] = useState(90);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string>();
+
+  const submit = async () => {
+    if (!outline.trim()) {
+      setError("Paste at least one outline line.");
+      return;
+    }
+    setSaving(true);
+    setError(undefined);
+    try {
+      await onCreate({
+        name: name.trim() || "Custom outline rehearsal",
+        outline,
+        durationTargetSec,
+      });
+      setName("");
+      setOutline("");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <details className="panel custom-drill-import">
+      <summary>Import a rehearsal outline</summary>
+      <p className="muted">
+        Paste plain text or Markdown. Each heading or bullet becomes a lens-adjacent outline beat.
+      </p>
+      <label>
+        Drill name
+        <input
+          value={name}
+          disabled={disabled || saving}
+          placeholder="My presentation rehearsal"
+          onChange={(event) => setName(event.target.value)}
+        />
+      </label>
+      <label>
+        Target duration (seconds)
+        <input
+          type="number"
+          min={30}
+          max={600}
+          value={durationTargetSec}
+          disabled={disabled || saving}
+          onChange={(event) =>
+            setDurationTargetSec(
+              Math.min(600, Math.max(30, Number(event.target.value) || 90)),
+            )
+          }
+        />
+      </label>
+      <label>
+        Plain-text or Markdown outline
+        <textarea
+          value={outline}
+          disabled={disabled || saving}
+          placeholder={"# Opening\n- Main claim\n- Evidence\n- Next step"}
+          onChange={(event) => setOutline(event.target.value)}
+        />
+      </label>
+      {error && <p className="tracking-warning">{error}</p>}
+      <button
+        type="button"
+        className="secondary"
+        disabled={disabled || saving}
+        onClick={() => void submit()}
+      >
+        {saving ? "Saving…" : "Create rehearsal drill"}
+      </button>
+    </details>
+  );
+}
+
 export function LensAdjacentPromptOverlay({
   drill,
   anchor,

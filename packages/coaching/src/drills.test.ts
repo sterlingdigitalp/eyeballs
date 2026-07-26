@@ -38,7 +38,7 @@ describe("drill content loading and validation", () => {
 
   it("loads built-in drills from content with versions and all six curriculum levels", () => {
     const drills = loadBuiltinDrills();
-    expect(drills.length).toBeGreaterThanOrEqual(6);
+    expect(drills).toHaveLength(10);
     assertCurriculumCoverage(drills);
     const byLevel = drillsByCurriculumLevel();
     for (const level of curriculumLevels) {
@@ -53,6 +53,10 @@ describe("drill content loading and validation", () => {
     const lensHold = getDrillById("relaxed-lens-hold-01");
     expect(lensHold?.name).toBe("Relaxed lens hold");
     expect(lensHold?.mode).toBe("lens_comfort");
+    expect(getDrillById("greeting-introduction-01")).toBeDefined();
+    expect(getDrillById("finish-sentence-through-lens-01")).toBeDefined();
+    expect(getDrillById("notes-and-recover-01")).toBeDefined();
+    expect(getDrillById("review-only-rehearsal-01")).toBeDefined();
   });
 
   it("rejects invalid drill content with structured issues", () => {
@@ -102,6 +106,7 @@ describe("drill content loading and validation", () => {
       curriculumLevel: 1,
       feedbackIntensity: "minimal",
       scoringPolicyVersion: SCORING_POLICY_VERSION,
+      drillSnapshot: drill,
       sessionGoal: "Stay relaxed for 30 seconds",
       comfortBefore: 3,
       liveAssist: false,
@@ -118,6 +123,9 @@ describe("drill content loading and validation", () => {
     expect(drill.mode).toBe("presentation_rehearsal");
     expect(drill.prompt.phrases?.length).toBe(4);
     expect(drill.prompt.phrases?.[0]).toBe("Opening");
+    const short = drillFromOutline("One beat", { durationTargetSec: 30 });
+    expect(short.completion.minimumDurationSec).toBeLessThanOrEqual(30);
+    expect(short.completion.minimumSpeakingSec).toBeLessThanOrEqual(30);
   });
 
   it("fails curriculum coverage when a level is missing", () => {

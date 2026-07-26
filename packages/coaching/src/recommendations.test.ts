@@ -3,6 +3,7 @@ import type { GazePrediction, SessionManifest } from "../../contracts/src";
 import { loadBuiltinDrills } from "./drills";
 import {
   applyRecommendationFeedback,
+  recommendationAwaitingUsefulness,
   recommendNext,
   RECOMMENDATION_RULES_VERSION,
 } from "./recommendations";
@@ -124,5 +125,30 @@ describe("deterministic recommendations", () => {
     expect(updated.followed).toBe(true);
     expect(updated.useful).toBe(false);
     expect(updated.reason).toBe(base.reason);
+  });
+
+  it("does not treat following as useful until a resulting session exists and is rated", () => {
+    const followed = {
+      id: "rf-return-from-notes",
+      recommendationId: "return-from-notes",
+      drillId: "notes-and-recover-01",
+      followed: true,
+      updatedAt: "2026-07-26T12:00:00.000Z",
+    };
+    expect(
+      recommendationAwaitingUsefulness([followed], []),
+    ).toBeUndefined();
+    expect(
+      recommendationAwaitingUsefulness(
+        [followed],
+        ["return-from-notes"],
+      ),
+    ).toEqual(followed);
+    expect(
+      recommendationAwaitingUsefulness(
+        [{ ...followed, useful: false }],
+        ["return-from-notes"],
+      ),
+    ).toBeUndefined();
   });
 });

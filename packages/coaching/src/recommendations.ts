@@ -1,4 +1,7 @@
-import type { DrillDefinition } from "../../contracts/src";
+import type {
+  DrillDefinition,
+  RecommendationFeedback,
+} from "../../contracts/src";
 import type { ProgressSessionInput, SessionTrendPoint } from "./progress";
 import { computeSessionTrendPoint } from "./progress";
 import { loadBuiltinDrills } from "./drills";
@@ -173,4 +176,23 @@ export function applyRecommendationFeedback(
   feedback: { dismissed?: boolean; pinned?: boolean; followed?: boolean; useful?: boolean },
 ): Recommendation {
   return { ...recommendation, ...feedback };
+}
+
+/**
+ * A recommendation can be judged useful only after a session actually records
+ * that it was followed. Following it is not itself positive feedback.
+ */
+export function recommendationAwaitingUsefulness(
+  feedback: RecommendationFeedback[],
+  completedFollowedRecommendationIds: Iterable<string>,
+): RecommendationFeedback | undefined {
+  const completed = new Set(completedFollowedRecommendationIds);
+  return [...feedback]
+    .filter(
+      (entry) =>
+        entry.followed === true &&
+        entry.useful === undefined &&
+        completed.has(entry.recommendationId),
+    )
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
 }

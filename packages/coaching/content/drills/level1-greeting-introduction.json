@@ -1,0 +1,40 @@
+{
+  "id": "greeting-introduction-01",
+  "version": 1,
+  "name": "Warm greeting and introduction",
+  "mode": "lens_comfort",
+  "curriculumLevel": 1,
+  "durationTargetSec": 35,
+  "prompt": {
+    "type": "question",
+    "text": "Greet one person and introduce yourself in two relaxed sentences.",
+    "revealMode": "hide_on_speech",
+    "revealSec": 5,
+    "hideWhenSpeaking": true
+  },
+  "contactPolicy": {
+    "microGlanceToleranceMs": 650,
+    "reportableBreakMinMs": 1200,
+    "longBreakMinMs": 2600,
+    "contactRecoveryConfirmMs": 250,
+    "feedbackCooldownMs": 4500,
+    "feedbackLevel": "minimal"
+  },
+  "scoring": {
+    "excludeFirstSec": 2,
+    "excludeLastSec": 0,
+    "sentenceBoundaryContact": true,
+    "speakingWindowsOnly": true
+  },
+  "noteAllowedIntervals": [],
+  "completion": {
+    "minimumSpeakingSec": 10,
+    "minimumDurationSec": 20
+  },
+  "reflection": [
+    "Did the greeting feel like it was aimed at a person?",
+    "Were your sentence endings still directed through the lens?"
+  ],
+  "liveAssist": false,
+  "recordingDefault": "optional"
+}
