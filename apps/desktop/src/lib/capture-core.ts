@@ -3,8 +3,10 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import {
   buildCaptureCoreRecordRequest,
   CAPTURE_CORE_DEFAULT_SEGMENT_SEC,
+  CAPTURE_CORE_VERTICAL_SLICE_SEC,
   captureCoreDeviceInventorySchema,
   captureCoreRunResultSchema,
+  isCaptureCoreVerticalSliceComplete,
   reconcileDeviceBindings,
   type CaptureCoreDeviceInventory,
   type CaptureCoreRecordRequest,
@@ -154,8 +156,32 @@ export async function captureCoreLiveRecord(
   return prepareAndRecord({
     ...input,
     dryRun: false,
-    maxDurationSec: input.maxDurationSec ?? 15,
+    maxDurationSec: input.maxDurationSec ?? CAPTURE_CORE_VERTICAL_SLICE_SEC,
     segmentDurationSec: input.segmentDurationSec ?? CAPTURE_CORE_DEFAULT_SEGMENT_SEC,
+  });
+}
+
+/**
+ * Charter Stage 4 vertical slice: 30s live when AV camera is bound, else dry-run
+ * software path that still produces sealed, hashed segment files.
+ */
+export async function captureCoreVerticalSlice(input: {
+  profile: CaptureProfile;
+  preferLive?: boolean;
+}): Promise<CaptureCoreRunResult> {
+  const preferLive = input.preferLive !== false;
+  const hasAvCamera = Boolean(input.profile.deviceBindings?.avFoundationCameraId);
+  if (preferLive && hasAvCamera) {
+    return captureCoreLiveRecord({
+      profile: input.profile,
+      maxDurationSec: CAPTURE_CORE_VERTICAL_SLICE_SEC,
+      segmentDurationSec: CAPTURE_CORE_DEFAULT_SEGMENT_SEC,
+    });
+  }
+  return captureCoreDryRun({
+    profile: input.profile,
+    maxDurationSec: 1,
+    segmentDurationSec: 0.4,
   });
 }
 
@@ -195,5 +221,7 @@ export function summarizeCaptureCoreEvent(event: CaptureCoreProtocolEvent): stri
 export {
   buildCaptureCoreRecordRequest,
   CAPTURE_CORE_DEFAULT_SEGMENT_SEC,
+  CAPTURE_CORE_VERTICAL_SLICE_SEC,
+  isCaptureCoreVerticalSliceComplete,
   reconcileDeviceBindings,
 };

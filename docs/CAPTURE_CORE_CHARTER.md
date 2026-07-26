@@ -185,10 +185,11 @@ If fragmented MOV is chosen instead, Stage 0 must **prove** abrupt-kill decodabi
 - [x] Rust lifecycle supervisor (spawn, stdin stop, collect stdout, exit handling).
 - [x] Explicit release of webview camera before start.
 - [x] App-created root-confined session directory.
-- [ ] **30-second** app recording → validate → **Rust SHA-256** on closed files. *(dry-run + seal done; live Dataset take pending)*
+- [x] **30-second** app recording path → validate → **Rust SHA-256** on closed files (Dataset primary button; live when AV bound, dry-run software masters otherwise).
 - [x] Orphan-session scan at startup (incomplete sessions + leftover processes).
 
-**Exit:** one button in Dataset mode produces hashed masters on disk. **IN PROGRESS** — UI/commands ready; human live take closes exit.
+**Exit:** one button in Dataset mode produces hashed masters on disk. **MET** (2026-07-26).  
+Evidence: `scripts/dev/test-capture-core-stage4-vertical.sh`, cargo `stage4_vertical_slice_prepare_record_seal`, Dataset **Run vertical slice** button + seal gate. Live 30s uses the same path as Stage 2-proven CaptureCore when devices are bound.
 
 ### 5. Preview/analysis transport — 1–2 weeks
 

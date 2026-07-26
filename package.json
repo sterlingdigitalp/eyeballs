@@ -6,6 +6,7 @@
   "scripts": {
     "prepare:assets": "sh scripts/dev/prepare-assets.sh",
     "prepare:capture-core": "sh scripts/dev/prepare-capture-core-sidecar.sh",
+    "test:capture-core-stage4": "sh scripts/dev/test-capture-core-stage4-vertical.sh",
     "fixture:av": "sh scripts/dev/generate-synthetic-av-fixture.sh",
     "dev": "vite",
     "build": "tsc -b && vite build",

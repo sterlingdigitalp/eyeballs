@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   CAPTURE_CORE_DEFAULT_SEGMENT_SEC,
+  CAPTURE_CORE_VERTICAL_SLICE_SEC,
+  isCaptureCoreVerticalSliceComplete,
   shortSha256,
   type CaptureCoreRunResult,
   type CaptureProfile,
@@ -13,6 +15,7 @@ import {
   captureCoreScanOrphans,
   captureCoreSessionsRoot,
   captureCoreStop,
+  captureCoreVerticalSlice,
   isCaptureCoreHostAvailable,
   listenCaptureCoreEvents,
   summarizeCaptureCoreEvent,
@@ -43,7 +46,7 @@ export function CaptureCorePanel({ profile, onReleaseMedia, onProfilePatched }: 
   const [orphans, setOrphans] = useState<OrphanRow[]>([]);
   const [lastRun, setLastRun] = useState<CaptureCoreRunResult>();
   const [bindNote, setBindNote] = useState<string>();
-  const [liveSeconds, setLiveSeconds] = useState(15);
+  const [liveSeconds, setLiveSeconds] = useState(CAPTURE_CORE_VERTICAL_SLICE_SEC);
   const [progress, setProgress] = useState<string>();
   const [liveEvent, setLiveEvent] = useState<CaptureCoreProtocolEvent>();
 
@@ -93,7 +96,7 @@ export function CaptureCorePanel({ profile, onReleaseMedia, onProfilePatched }: 
   }, [host]);
 
   const runWith = async (
-    kind: "dry" | "live",
+    kind: "dry" | "live" | "slice",
     action: () => Promise<CaptureCoreRunResult>,
   ) => {
     if (!profile) {
@@ -103,43 +106,73 @@ export function CaptureCorePanel({ profile, onReleaseMedia, onProfilePatched }: 
     setBusy(true);
     setError(undefined);
     setBindNote(undefined);
-    setProgress(kind === "dry" ? "Starting dry-run…" : "Starting live record…");
+    setProgress(
+      kind === "dry"
+        ? "Starting dry-run…"
+        : kind === "slice"
+          ? "Starting Stage 4 vertical slice…"
+          : "Starting live record…",
+    );
     setLiveEvent(undefined);
     onReleaseMedia();
     try {
       const result = await action();
       setLastRun(result);
+      const sealed = isCaptureCoreVerticalSliceComplete(result);
       setProgress(
         result.exitCode === 0
-          ? result.dryRun
-            ? "Dry-run complete"
-            : "Live take complete"
+          ? sealed
+            ? result.dryRun
+              ? "Vertical slice sealed (dry-run masters)"
+              : "Vertical slice sealed (live masters)"
+            : "Finished but seal incomplete"
           : `Finished with exit ${result.exitCode}`,
       );
-      void logEvent(kind === "dry" ? "capture_core_dry_run_complete" : "capture_core_live_complete", {
-        fields: {
-          exitCode: result.exitCode,
-          segmentCount: result.segmentHashes.length,
-          sessionRoot: result.sessionRoot,
-          dryRun: result.dryRun,
+      void logEvent(
+        kind === "dry"
+          ? "capture_core_dry_run_complete"
+          : kind === "slice"
+            ? "capture_core_vertical_slice_complete"
+            : "capture_core_live_complete",
+        {
+          fields: {
+            exitCode: result.exitCode,
+            segmentCount: result.segmentHashes.length,
+            sessionRoot: result.sessionRoot,
+            dryRun: result.dryRun,
+            verticalSliceComplete: sealed,
+            sealPath: result.sealPath ?? null,
+          },
         },
-      });
+      );
       await refreshOrphans();
       if (result.exitCode !== 0) {
         setError(`CaptureCore exited with code ${result.exitCode}`);
+      } else if (!sealed) {
+        setError("Recording finished but Rust session seal or segment hashes are missing.");
       }
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : String(cause);
       setError(message);
       setProgress(undefined);
-      void logEvent(kind === "dry" ? "capture_core_dry_run_failed" : "capture_core_live_failed", {
-        level: "error",
-        fields: { message },
-      });
+      void logEvent(
+        kind === "dry"
+          ? "capture_core_dry_run_failed"
+          : kind === "slice"
+            ? "capture_core_vertical_slice_failed"
+            : "capture_core_live_failed",
+        {
+          level: "error",
+          fields: { message },
+        },
+      );
     } finally {
       setBusy(false);
     }
   };
+
+  const runVerticalSlice = () =>
+    void runWith("slice", () => captureCoreVerticalSlice({ profile: profile! }));
 
   const runDryRun = () =>
     void runWith("dry", () =>
@@ -200,17 +233,17 @@ export function CaptureCorePanel({ profile, onReleaseMedia, onProfilePatched }: 
 
   const bindings = profile?.deviceBindings;
   const avReady = Boolean(bindings?.avFoundationCameraId);
-  const success = lastRun && lastRun.exitCode === 0;
+  const sliceComplete = lastRun ? isCaptureCoreVerticalSliceComplete(lastRun) : false;
   const payload = liveEvent?.payload;
 
   return (
     <section className="screen dataset-screen">
       <div className="screen-copy">
-        <p className="eyebrow">Dataset</p>
+        <p className="eyebrow">Dataset · Stage 4</p>
         <h1>CaptureCore masters</h1>
         <p className="lede">
-          Practice camera is released before every take. Live progress streams from the sidecar;
-          stop ends the open segment cleanly when a record is running.
+          One primary action: run the vertical slice. The practice camera is released first;
+          closed segments are SHA-256 sealed in Rust under Application Support.
         </p>
       </div>
 
@@ -223,7 +256,7 @@ export function CaptureCorePanel({ profile, onReleaseMedia, onProfilePatched }: 
 
       <div className="dataset-grid">
         <div className="panel">
-          <h2>Record</h2>
+          <h2>Vertical slice</h2>
           <dl className="dataset-facts">
             <div>
               <dt>Profile</dt>
@@ -232,12 +265,14 @@ export function CaptureCorePanel({ profile, onReleaseMedia, onProfilePatched }: 
             <div>
               <dt>AV camera</dt>
               <dd className={avReady ? "" : "muted"}>
-                {bindings?.avFoundationCameraId ? "Bound" : "Not bound"}
+                {bindings?.avFoundationCameraId
+                  ? "Bound · live 30s slice available"
+                  : "Not bound · slice uses dry-run masters"}
               </dd>
             </div>
             <div>
-              <dt>Segments</dt>
-              <dd>{CAPTURE_CORE_DEFAULT_SEGMENT_SEC}s finalized chunks (default)</dd>
+              <dt>Live duration</dt>
+              <dd>{CAPTURE_CORE_VERTICAL_SLICE_SEC}s (charter) · {CAPTURE_CORE_DEFAULT_SEGMENT_SEC}s segments</dd>
             </div>
             <div>
               <dt>Incomplete sessions</dt>
@@ -245,22 +280,13 @@ export function CaptureCorePanel({ profile, onReleaseMedia, onProfilePatched }: 
             </div>
           </dl>
 
-          <label className="dataset-duration">
-            Live duration (seconds)
-            <input
-              type="number"
-              min={5}
-              max={120}
-              step={5}
-              value={liveSeconds}
-              disabled={busy}
-              onChange={(event) => setLiveSeconds(Number(event.target.value) || 15)}
-            />
-          </label>
-
           <div className="dataset-actions">
-            <button disabled={!host || busy || !profile || !avReady} onClick={runLive}>
-              {busy ? "Recording…" : `Live record ${Math.min(120, Math.max(5, liveSeconds))}s`}
+            <button disabled={!host || busy || !profile} onClick={runVerticalSlice}>
+              {busy
+                ? "Running…"
+                : avReady
+                  ? `Run ${CAPTURE_CORE_VERTICAL_SLICE_SEC}s live slice`
+                  : "Run vertical slice (dry-run)"}
             </button>
             <button
               className="stop"
@@ -269,28 +295,55 @@ export function CaptureCorePanel({ profile, onReleaseMedia, onProfilePatched }: 
             >
               Stop
             </button>
-            <button
-              className="secondary"
-              disabled={!host || busy || !profile}
-              onClick={runDryRun}
-            >
-              Dry-run
-            </button>
-            <button
-              className="secondary"
-              disabled={!host || busy || !profile}
-              onClick={() => void bindDevices()}
-            >
-              Match devices by name
-            </button>
-            <button
-              className="secondary"
-              disabled={!host || busy}
-              onClick={() => void refreshOrphans()}
-            >
-              Scan orphans
-            </button>
           </div>
+
+          <details className="dataset-details">
+            <summary>More recording options</summary>
+            <label className="dataset-duration">
+              Custom live duration (seconds)
+              <input
+                type="number"
+                min={5}
+                max={120}
+                step={5}
+                value={liveSeconds}
+                disabled={busy}
+                onChange={(event) =>
+                  setLiveSeconds(Number(event.target.value) || CAPTURE_CORE_VERTICAL_SLICE_SEC)
+                }
+              />
+            </label>
+            <div className="dataset-actions">
+              <button
+                className="secondary"
+                disabled={!host || busy || !profile || !avReady}
+                onClick={runLive}
+              >
+                Live {Math.min(120, Math.max(5, liveSeconds))}s
+              </button>
+              <button
+                className="secondary"
+                disabled={!host || busy || !profile}
+                onClick={runDryRun}
+              >
+                Dry-run only
+              </button>
+              <button
+                className="secondary"
+                disabled={!host || busy || !profile}
+                onClick={() => void bindDevices()}
+              >
+                Match devices by name
+              </button>
+              <button
+                className="secondary"
+                disabled={!host || busy}
+                onClick={() => void refreshOrphans()}
+              >
+                Scan orphans
+              </button>
+            </div>
+          </details>
 
           {(busy || progress) && (
             <div className={`dataset-progress ${busy ? "live" : ""}`} role="status" aria-live="polite">
@@ -314,12 +367,13 @@ export function CaptureCorePanel({ profile, onReleaseMedia, onProfilePatched }: 
               <span>{error}</span>
             </div>
           )}
-          {success && !busy && (
+          {sliceComplete && !busy && lastRun && (
             <div className="notice success" role="status">
-              <strong>{lastRun.dryRun ? "Dry-run sealed" : "Live take sealed"}</strong>
+              <strong>Stage 4 slice complete</strong>
               <span>
-                {lastRun.segmentHashes.length} file
-                {lastRun.segmentHashes.length === 1 ? "" : "s"} · exit {lastRun.exitCode}
+                {lastRun.segmentHashes.length} hashed file
+                {lastRun.segmentHashes.length === 1 ? "" : "s"} · Rust seal written
+                {lastRun.dryRun ? " · dry-run masters" : " · live masters"}
               </span>
             </div>
           )}
@@ -329,7 +383,7 @@ export function CaptureCorePanel({ profile, onReleaseMedia, onProfilePatched }: 
           <h2>Last seal</h2>
           {!lastRun && (
             <p className="muted dataset-empty">
-              Run a dry-run or live take to write masters and see SHA-256 digests.
+              Run the vertical slice to write masters and see SHA-256 digests.
             </p>
           )}
           {lastRun && (
@@ -353,8 +407,9 @@ export function CaptureCorePanel({ profile, onReleaseMedia, onProfilePatched }: 
             {lastRun && (
               <p className="muted">
                 Session: {lastRun.sessionRoot}
-                {lastRun.sealPath ? " · seal written" : ""}
+                {lastRun.sealPath ? " · seal written" : " · no seal"}
                 {lastRun.dryRun ? " · dry-run" : " · live"}
+                {sliceComplete ? " · vertical slice OK" : ""}
               </p>
             )}
             {orphans.length > 0 && (

@@ -107,6 +107,23 @@ export type CaptureCoreRecordRequest = z.infer<typeof captureCoreRecordRequestSc
 /** Default immutable segment length (seconds) — short for kill recovery. */
 export const CAPTURE_CORE_DEFAULT_SEGMENT_SEC = 10;
 
+/** Charter Stage 4 vertical-slice live duration (seconds). */
+export const CAPTURE_CORE_VERTICAL_SLICE_SEC = 30;
+
+/** True when a CaptureCore run produced a Rust seal and at least one hashed segment. */
+export function isCaptureCoreVerticalSliceComplete(result: {
+  exitCode: number;
+  segmentHashes: Array<{ sha256: string; byteLength: number }>;
+  sealPath?: string | null;
+}): boolean {
+  if (result.exitCode !== 0) return false;
+  if (!result.sealPath) return false;
+  if (result.segmentHashes.length < 1) return false;
+  return result.segmentHashes.every(
+    (segment) => segment.sha256.length === 64 && segment.byteLength >= 0,
+  );
+}
+
 export const captureCoreSegmentHashSchema = z.object({
   path: z.string(),
   sha256: z.string().length(64),

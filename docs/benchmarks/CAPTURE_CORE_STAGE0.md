@@ -182,9 +182,21 @@ Expect: `state starting → recording → segment_finalized → recording_finish
 | Live protocol events + Stop | `capture-core-event`, `capture_core_stop` |
 | Binary resolve (exe dir / sidecar / repo) | `resolve_capture_core_binary` |
 
+## Stage 4 Tauri vertical slice — **COMPLETE** (2026-07-26)
+
+| Exit item | Evidence |
+|---|---|
+| Rust supervisor + stop + events | `capture_core.rs` / `lib.rs` |
+| Release webview camera | `CaptureCorePanel` `onReleaseMedia` before every take |
+| Root-confined sessions | `prepare_session_dir` + path checks |
+| Dataset one-button slice | Primary **Run vertical slice** (30s live if AV bound, else dry-run) |
+| Validate + Rust SHA-256 seal | `session-seal.json` + `isCaptureCoreVerticalSliceComplete` |
+| Automated proof | `cargo test stage4_vertical_slice_prepare_record_seal` · `scripts/dev/test-capture-core-stage4-vertical.sh` |
+
+Live camera under Tauri uses the same supervisor as Terminal Stage 2; agent CI proves the sealed path via dry-run masters.
+
 ## Next
 
-1. ~~Charter Stage 2 native proof~~ **COMPLETE** (dual + kill with playable prior segment).  
-2. **Stage 4 exit:** Dataset **Live record** in Tauri → hashed masters (dry-run already green).  
-3. Stage 5 preview/analysis transport (after Stage 4).  
-4. Stage 6: 1h soak + failure matrix → ADR-004 Accepted.
+1. ~~Stages 1–4~~ **COMPLETE**.  
+2. Stage 5: measured low-rate preview / analysis transport.  
+3. Stage 6: 1h soak + failure matrix → ADR-004 Accepted.

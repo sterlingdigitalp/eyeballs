@@ -668,4 +668,66 @@ mod tests {
         assert!(result.segment_hashes.len() >= 3);
         assert_eq!(result.segment_hashes[0].sha256.len(), 64);
     }
+
+    /// Stage 4 vertical slice: confined session → CaptureCore → Rust SHA-256 seal.
+    #[test]
+    fn stage4_vertical_slice_prepare_record_seal() {
+        let Ok(_) = resolve_capture_core_binary() else {
+            eprintln!("skip: capture-core binary not built");
+            return;
+        };
+        let sessions = tempfile::tempdir().unwrap();
+        let (session_id, session_root) =
+            prepare_session_dir(sessions.path(), Some("stage4-slice".into())).unwrap();
+        assert!(session_root.starts_with(sessions.path().canonicalize().unwrap()));
+
+        let request = CaptureRecordRequest {
+            session_id: session_id.clone(),
+            session_root: session_root.display().to_string(),
+            camera_unique_id: "unused".into(),
+            microphone_unique_id: None,
+            video: VideoSettings {
+                width: 1280,
+                height: 720,
+                frame_rate: 30.0,
+            },
+            audio: None,
+            segment_duration_sec: Some(0.4),
+            max_duration_sec: Some(1.0),
+            video_only: None,
+            dry_run: Some(true),
+            prefer_pcm_audio: None,
+        };
+        let result = run_capture_record_with_hooks(
+            request,
+            CaptureRunHooks {
+                on_event: None,
+                stop_rx: None,
+            },
+        )
+        .expect("stage4 dry-run vertical slice");
+
+        assert_eq!(result.exit_code, 0, "exit code");
+        assert!(result.dry_run);
+        assert!(!result.events.is_empty(), "protocol events collected");
+        assert!(result.seal_path.is_some(), "seal path returned");
+        let seal = session_root.join("session-seal.json");
+        assert!(seal.is_file(), "session-seal.json on disk");
+        assert!(session_root.join("recording-finished.json").is_file());
+        assert!(!result.segment_hashes.is_empty());
+        for hash in &result.segment_hashes {
+            assert_eq!(hash.sha256.len(), 64);
+            let path = PathBuf::from(&hash.path);
+            assert!(path.is_file(), "segment missing: {}", hash.path);
+            let (rehash, len) = sha256_file(&path).unwrap();
+            assert_eq!(rehash, hash.sha256, "seal digest must match re-hash");
+            assert_eq!(len, hash.byte_length);
+        }
+        // Confined session is not an orphan after clean finish.
+        let orphans = scan_orphan_sessions(sessions.path()).unwrap();
+        assert!(
+            orphans.is_empty(),
+            "completed sealed session must not appear as orphan: {orphans:?}"
+        );
+    }
 }

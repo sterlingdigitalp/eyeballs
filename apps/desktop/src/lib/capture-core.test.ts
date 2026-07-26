@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   buildCaptureCoreRecordRequest,
+  CAPTURE_CORE_VERTICAL_SLICE_SEC,
   captureCoreDeviceIds,
   captureProfileSchema,
+  isCaptureCoreVerticalSliceComplete,
   type CaptureProfile,
 } from "../../../../packages/contracts/src";
 import { summarizeCaptureCoreEvent } from "./capture-core";
@@ -78,5 +80,28 @@ describe("summarizeCaptureCoreEvent", () => {
         payload: { videoFrames: 12, segmentIndex: 0 },
       }),
     ).toContain("12 frames");
+  });
+});
+
+describe("Stage 4 vertical slice gate", () => {
+  it("uses 30s charter duration constant", () => {
+    expect(CAPTURE_CORE_VERTICAL_SLICE_SEC).toBe(30);
+  });
+
+  it("accepts sealed hashed run results", () => {
+    expect(
+      isCaptureCoreVerticalSliceComplete({
+        exitCode: 0,
+        sealPath: "/tmp/session-seal.json",
+        segmentHashes: [{ sha256: "a".repeat(64), byteLength: 12 }],
+      }),
+    ).toBe(true);
+    expect(
+      isCaptureCoreVerticalSliceComplete({
+        exitCode: 0,
+        sealPath: null,
+        segmentHashes: [{ sha256: "a".repeat(64), byteLength: 12 }],
+      }),
+    ).toBe(false);
   });
 });
