@@ -34,6 +34,20 @@ npm run prepare:capture-core
 Set `CAPTURE_CORE_BIN` to override discovery. Live records emit `capture-core-event`
 on the app event bus; `capture_core_stop` writes stdin `{"type":"stop"}`.
 
+## Stage 6 unattended soak (Terminal.app)
+
+```sh
+# 1 hour Brio 4K + Yeti — walk away
+cd /path/to/eyeballs-capture-core
+sh scripts/dev/run-capture-core-soak.sh brio-yeti 3600
+cat /tmp/capture-core-soak/brio-yeti-*/SOAK_RESULT.txt
+
+# Validate any session
+sh scripts/dev/validate-capture-session.sh /path/to/sessionRoot
+```
+
+See `docs/benchmarks/CAPTURE_CORE_STAGE6_MATRIX.md`.
+
 On-disk seals (orphan scan):
 - Swift writes `recording-finished.json` on clean stop / dry-run
 - Rust writes `session-seal.json` with streamed SHA-256 of segment files

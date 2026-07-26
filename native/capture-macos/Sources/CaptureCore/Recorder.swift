@@ -766,15 +766,37 @@ final class CaptureRecorder: NSObject, AVCaptureVideoDataOutputSampleBufferDeleg
             self.writerQueue.async {
                 self.finalizeCurrentSegmentLocked(reason: cancel ? "cancel" : "stop")
                 let code: CaptureCoreExitCode = cancel ? .cancelled : .success
-                let payload: [String: Any] = [
+                let wallSec = max(0.001, CFAbsoluteTimeGetCurrent() - self.recordingStartedAt)
+                let measuredFps = Double(self.videoFrames) / wallSec
+                var payload: [String: Any] = [
                     "exitCode": Int(code.rawValue),
                     "cancelled": cancel,
                     "segments": self.segmentIndex + 1,
+                    "finalizedSegments": self.finalizedSegmentCount,
                     "videoFrames": self.videoFrames,
                     "audioBuffers": self.audioBuffers,
+                    "droppedVideo": self.droppedVideo,
                     "sessionRoot": self.request.sessionRoot,
                     "status": cancel ? "cancelled" : "complete",
+                    // Stage 6 honesty fields
+                    "negotiatedWidth": self.negotiatedWidth,
+                    "negotiatedHeight": self.negotiatedHeight,
+                    "negotiatedFrameRate": self.negotiatedFrameRate,
+                    "requestedWidth": self.request.video.width,
+                    "requestedHeight": self.request.video.height,
+                    "requestedFrameRate": self.request.video.frameRate,
+                    "segmentDurationSec": self.request.resolvedSegmentDurationSec,
+                    "wallDurationSec": wallSec,
+                    "measuredVideoFps": measuredFps,
+                    "videoCodec": "h264",
+                    "preferPcmAudio": self.request.resolvedPreferPcmAudio,
+                    "previewFrames": self.previewFramesEmitted,
                 ]
+                if let vPts = self.firstVideoPtsUs { payload["firstVideoPtsUs"] = vPts }
+                if let aPts = self.firstAudioPtsUs { payload["firstAudioPtsUs"] = aPts }
+                if let vPts = self.firstVideoPtsUs, let aPts = self.firstAudioPtsUs {
+                    payload["avInitialOffsetUs"] = aPts - vPts
+                }
                 self.protocolWriter.emit(type: "recording_finished", payload: payload)
                 self.writeSessionMarker(name: "recording-finished.json", payload: payload)
                 if cancel {

@@ -124,13 +124,78 @@ pub fn hash_session_segments(session_root: &Path) -> Result<Vec<SegmentHash>, St
     Ok(out)
 }
 
+/// Best-effort metrics from recording-finished.json and protocol events (Stage 6 honesty).
+fn capture_metrics_from_session(session_root: &Path, events: &[Value]) -> Value {
+    let mut metrics = json!({});
+    let finished_path = session_root.join("recording-finished.json");
+    if let Ok(bytes) = fs::read(&finished_path) {
+        if let Ok(v) = serde_json::from_slice::<Value>(&bytes) {
+            for key in [
+                "negotiatedWidth",
+                "negotiatedHeight",
+                "negotiatedFrameRate",
+                "requestedWidth",
+                "requestedHeight",
+                "requestedFrameRate",
+                "measuredVideoFps",
+                "wallDurationSec",
+                "segmentDurationSec",
+                "videoCodec",
+                "preferPcmAudio",
+                "firstVideoPtsUs",
+                "firstAudioPtsUs",
+                "avInitialOffsetUs",
+                "videoFrames",
+                "audioBuffers",
+                "droppedVideo",
+                "finalizedSegments",
+                "previewFrames",
+            ] {
+                if let Some(val) = v.get(key) {
+                    metrics[key] = val.clone();
+                }
+            }
+        }
+    }
+    // Fallback: last health / recording_finished event payloads
+    for event in events.iter().rev() {
+        let typ = event.get("type").and_then(|t| t.as_str()).unwrap_or("");
+        if typ != "recording_finished" && typ != "health" {
+            continue;
+        }
+        if let Some(payload) = event.get("payload").and_then(|p| p.as_object()) {
+            for (k, v) in payload {
+                if metrics.get(k).is_none() {
+                    metrics[k] = v.clone();
+                }
+            }
+            if typ == "recording_finished" {
+                break;
+            }
+        }
+    }
+    metrics
+}
+
 /// Write `session-seal.json` with Rust SHA-256 digests after a clean CaptureCore exit.
+#[cfg(test)]
 pub fn write_session_seal(
     session_root: &Path,
     session_id: &str,
     exit_code: i32,
     dry_run: bool,
     segment_hashes: &[SegmentHash],
+) -> Result<PathBuf, String> {
+    write_session_seal_with_events(session_root, session_id, exit_code, dry_run, segment_hashes, &[])
+}
+
+pub fn write_session_seal_with_events(
+    session_root: &Path,
+    session_id: &str,
+    exit_code: i32,
+    dry_run: bool,
+    segment_hashes: &[SegmentHash],
+    events: &[Value],
 ) -> Result<PathBuf, String> {
     // CaptureCoreExitCode: 0 success, 5 cancelled (see RecordRequest.swift).
     let status = if exit_code == 0 {
@@ -140,6 +205,7 @@ pub fn write_session_seal(
     } else {
         "failed"
     };
+    let metrics = capture_metrics_from_session(session_root, events);
     let seal = json!({
         "protocolVersion": PROTOCOL_VERSION,
         "sessionId": session_id,
@@ -150,6 +216,7 @@ pub fn write_session_seal(
         "hashedBy": "rust-sha2",
         "segmentCount": segment_hashes.len(),
         "segments": segment_hashes,
+        "capture": metrics,
         "writtenAt": chrono::Utc::now().to_rfc3339(),
     });
     let path = session_root.join("session-seal.json");
@@ -401,12 +468,13 @@ pub fn run_capture_record_with_hooks(
                 let segment_hashes = hash_session_segments(&session_root)?;
                 let dry_run = request.dry_run.unwrap_or(false);
                 let seal_path = if exit_code == 0 || !segment_hashes.is_empty() {
-                    match write_session_seal(
+                    match write_session_seal_with_events(
                         &session_root,
                         &request.session_id,
                         exit_code,
                         dry_run,
                         &segment_hashes,
+                        &events,
                     ) {
                         Ok(p) => Some(p.display().to_string()),
                         Err(e) => {

@@ -207,6 +207,8 @@ Evidence: `docs/benchmarks/CAPTURE_CORE_STAGE5_PREVIEW.md`, Dataset framing pane
 - [ ] 1h + segmented multi-hour soaks (static room OK).
 - [ ] Recovery matrix + production ADR acceptance.
 
+**Scaffolding (soak-ready):** unattended launcher, segment validator, honesty fields on finish/seal, matrix doc — see `docs/benchmarks/CAPTURE_CORE_STAGE6_MATRIX.md`.
+
 **Exit:** soak + failure matrix documented; CaptureCore production ADR Accepted.
 
 **Effort:** **5–8 focused weeks** typical; **4–6** if TCC/packaging and preview behave cleanly.

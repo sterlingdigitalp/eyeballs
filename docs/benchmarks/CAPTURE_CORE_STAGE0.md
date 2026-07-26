@@ -197,5 +197,6 @@ Live camera under Tauri uses the same supervisor as Terminal Stage 2; agent CI p
 
 ## Next
 
-1. ~~Stages 1–5~~ **COMPLETE** (Stage 5: `docs/benchmarks/CAPTURE_CORE_STAGE5_PREVIEW.md`).  
-2. Stage 6: 1h soak + failure matrix → ADR-004 Accepted.
+1. ~~Stages 1–5~~ **COMPLETE**.  
+2. Stage 6 scaffolding **soak-ready** — `docs/benchmarks/CAPTURE_CORE_STAGE6_MATRIX.md`.  
+3. Human unattended soaks → fill matrix → ADR-004 Accepted.
