@@ -12,6 +12,7 @@ import type {
   GazePrediction,
   RecommendationFeedback,
   ReviewBookmark,
+  ReviewClip,
   SessionManifest,
   FeatureVector,
   SpeakingWindowRecord,
@@ -41,6 +42,7 @@ export interface StoredSession {
   events: GazeEvent[];
   corrections: Correction[];
   bookmarks?: ReviewBookmark[];
+  reviewClips?: ReviewClip[];
   cues?: CueEvent[];
   speakingWindows?: SpeakingWindowRecord[];
   /** Immutable model/stub transcript evidence. */

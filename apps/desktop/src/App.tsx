@@ -18,6 +18,7 @@ import type {
   GazeState,
   RecordingAsset,
   ReviewBookmark,
+  ReviewClip,
   SentenceBoundary,
   SessionManifest,
   TranscriptDocument,
@@ -2322,6 +2323,12 @@ function Review({
   const [editingSentenceIndex, setEditingSentenceIndex] = useState<number>();
   const [transcriptError, setTranscriptError] = useState<string>();
   const [transcriptNotice, setTranscriptNotice] = useState<string>();
+  const [clipDraft, setClipDraft] = useState({
+    start: "0",
+    end: "1",
+    note: "",
+  });
+  const [clipError, setClipError] = useState<string>();
   const playbackRef = useRef<HTMLVideoElement>(null);
   const selected = sessions.find((session) => session.manifest.id === selectedId) ?? sessions[0];
   const effectiveTranscript =
@@ -2408,6 +2415,7 @@ function Review({
             speakingWindows: selected.speakingWindows,
             sentences: effectiveTranscript?.sentences,
             bookmarks: selected.bookmarks,
+            reviewClips: selected.reviewClips,
           })
         : [],
     [
@@ -2430,6 +2438,8 @@ function Review({
     setEditingSentenceIndex(undefined);
     setTranscriptError(undefined);
     setTranscriptNotice(undefined);
+    setClipDraft({ start: "0", end: "1", note: "" });
+    setClipError(undefined);
   }, [selected?.manifest.id]);
 
   const addCorrection = async () => {
@@ -2580,6 +2590,7 @@ function Review({
       cues: selected.cues ?? [],
       speakingWindows: selected.speakingWindows ?? [],
       bookmarks: selected.bookmarks ?? [],
+      reviewClips: selected.reviewClips ?? [],
       transcript: selected.transcript,
       correctedTranscript: selected.correctedTranscript,
     });
@@ -2596,6 +2607,7 @@ function Review({
       speakingWindows: selected.speakingWindows,
       sentences: effectiveTranscript?.sentences,
       bookmarks: selected.bookmarks,
+      reviewClips: selected.reviewClips,
       originUs: reviewOriginUs,
       durationUs: timelineDurationUs || 1,
     });
@@ -2861,6 +2873,73 @@ function Review({
       }
     } catch {
       // The persistence helper exposes a user-readable validation error.
+    }
+  };
+
+  const addReviewClip = async () => {
+    if (!selected) return;
+    const startSeconds = Number(clipDraft.start);
+    const endSeconds = Number(clipDraft.end);
+    const availableSeconds = timelineDurationUs / 1_000_000;
+    if (
+      !Number.isFinite(startSeconds) ||
+      !Number.isFinite(endSeconds) ||
+      startSeconds < 0 ||
+      endSeconds <= startSeconds
+    ) {
+      setClipError("Enter a non-negative in point and an out point after it.");
+      return;
+    }
+    if (availableSeconds <= 0 || endSeconds > availableSeconds + 0.05) {
+      setClipError(
+        `The clip must end within the ${availableSeconds.toFixed(2)}-second session.`,
+      );
+      return;
+    }
+    const clip: ReviewClip = {
+      id: crypto.randomUUID(),
+      sessionId: selected.manifest.id,
+      startUs: Math.round(startSeconds * 1_000_000),
+      endUs: Math.round(endSeconds * 1_000_000),
+      note: clipDraft.note.trim() || undefined,
+      createdAt: new Date().toISOString(),
+    };
+    const updated: StoredSession = {
+      ...selected,
+      reviewClips: [...(selected.reviewClips ?? []), clip],
+    };
+    try {
+      await store.sessions.put(updated);
+      onUpdated(updated);
+      setClipDraft({ start: "0", end: "1", note: "" });
+      setClipError(undefined);
+    } catch (cause) {
+      setClipError(
+        `Review clip could not be saved: ${
+          cause instanceof Error ? cause.message : String(cause)
+        }`,
+      );
+    }
+  };
+
+  const removeReviewClip = async (clipId: string) => {
+    if (!selected) return;
+    const updated: StoredSession = {
+      ...selected,
+      reviewClips: (selected.reviewClips ?? []).filter(
+        (clip) => clip.id !== clipId,
+      ),
+    };
+    try {
+      await store.sessions.put(updated);
+      onUpdated(updated);
+      setClipError(undefined);
+    } catch (cause) {
+      setClipError(
+        `Review clip could not be deleted: ${
+          cause instanceof Error ? cause.message : String(cause)
+        }`,
+      );
     }
   };
 
@@ -3149,6 +3228,95 @@ function Review({
               {bookmarkError && (
                 <p className="tracking-warning">{bookmarkError}</p>
               )}
+            </div>
+            <div className="panel review-clip-panel">
+              <h2>Review clip selections</h2>
+              <p className="muted">
+                These in/out points are review annotations only. They are not
+                automatically promoted into the dataset.
+              </p>
+              <div className="correction-form">
+                <label>
+                  In (s)
+                  <input
+                    value={clipDraft.start}
+                    onChange={(event) =>
+                      setClipDraft({ ...clipDraft, start: event.target.value })
+                    }
+                  />
+                </label>
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={() =>
+                    setClipDraft({
+                      ...clipDraft,
+                      start: playbackTime.toFixed(2),
+                    })
+                  }
+                >
+                  Set in
+                </button>
+                <label>
+                  Out (s)
+                  <input
+                    value={clipDraft.end}
+                    onChange={(event) =>
+                      setClipDraft({ ...clipDraft, end: event.target.value })
+                    }
+                  />
+                </label>
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={() =>
+                    setClipDraft({
+                      ...clipDraft,
+                      end: playbackTime.toFixed(2),
+                    })
+                  }
+                >
+                  Set out
+                </button>
+                <label>
+                  Note
+                  <input
+                    value={clipDraft.note}
+                    maxLength={1000}
+                    placeholder="Why keep this range?"
+                    onChange={(event) =>
+                      setClipDraft({ ...clipDraft, note: event.target.value })
+                    }
+                  />
+                </label>
+                <button type="button" onClick={() => void addReviewClip()}>
+                  Save clip
+                </button>
+              </div>
+              {(selected.reviewClips ?? []).map((clip) => (
+                <div className="cue-rating-row" key={clip.id}>
+                  <button
+                    type="button"
+                    className="text-button"
+                    onClick={() => seekToTimelineUs(clip.startUs)}
+                  >
+                    {(clip.startUs / 1_000_000).toFixed(2)}–
+                    {(clip.endUs / 1_000_000).toFixed(2)}s
+                    {clip.note ? ` · ${clip.note}` : ""}
+                  </button>
+                  <button
+                    type="button"
+                    className="secondary"
+                    onClick={() => void removeReviewClip(clip.id)}
+                  >
+                    Delete
+                  </button>
+                </div>
+              ))}
+              {(selected.reviewClips?.length ?? 0) === 0 && (
+                <p className="muted">No review clips selected.</p>
+              )}
+              {clipError && <p className="tracking-warning">{clipError}</p>}
             </div>
             {(selected.cues?.length ?? 0) > 0 && (
               <div className="panel cue-rating-panel">

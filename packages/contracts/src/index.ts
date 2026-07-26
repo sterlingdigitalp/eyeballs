@@ -508,6 +508,22 @@ export const reviewBookmarkSchema = z.object({
 });
 export type ReviewBookmark = z.infer<typeof reviewBookmarkSchema>;
 
+export const reviewClipSchema = z
+  .object({
+    id: z.string().min(1),
+    sessionId: z.string().min(1),
+    /** Session-relative review selection; never an automatic dataset label. */
+    startUs: z.number().int().nonnegative(),
+    endUs: z.number().int().positive(),
+    note: z.string().min(1).max(1000).optional(),
+    createdAt: z.string().datetime(),
+  })
+  .refine((clip) => clip.endUs > clip.startUs, {
+    message: "Review clip endUs must be after startUs",
+    path: ["endUs"],
+  });
+export type ReviewClip = z.infer<typeof reviewClipSchema>;
+
 export const transcriptWordSchema = z
   .object({
     text: z.string().min(1),

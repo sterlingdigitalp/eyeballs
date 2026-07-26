@@ -103,12 +103,21 @@ describe("session checkpoint merge", () => {
       note: "Review this recovery",
       createdAt: "2026-07-26T12:00:00.000Z",
     }];
+    browser.reviewClips = [{
+      id: "review-clip-1",
+      sessionId: "1",
+      startUs: 500,
+      endUs: 1_500,
+      note: "Keep this",
+      createdAt: "2026-07-26T12:00:00.000Z",
+    }];
     const [merged] = mergeStoredSessions([browser], [native]);
     expect(merged.manifest.status).toBe("incomplete");
     expect(merged.features).toHaveLength(50);
     expect(merged.cues).toEqual(browser.cues);
     expect(merged.speakingWindows).toEqual(browser.speakingWindows);
     expect(merged.bookmarks).toEqual(browser.bookmarks);
+    expect(merged.reviewClips).toEqual(browser.reviewClips);
   });
 
   it("keeps the richer native coaching evidence when browser evidence is stale", () => {

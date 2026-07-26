@@ -1975,6 +1975,8 @@ Implemented and covered by device-free tests:
 - Review import for timestamped transcript JSON plus manual add/edit/delete
   controls for non-overlapping sentence boundaries, with corrected boundaries
   feeding the timeline, analysis export, and Markdown/JSON session report;
+- durable review-only clip in/out selections with playhead controls, timeline
+  segments, and analysis/report export, without automatic dataset promotion;
 - accessible rolling sparklines for every like-for-like Progress metric, while
   retaining baseline identity and measurement-degradation warnings;
 - hands-free drill guidance: spoken instruction, four-second settle interval,
@@ -1993,7 +1995,7 @@ Still open for later Phase 2 slices:
 
 - custom-drill editing/deletion and richer per-beat timing controls;
 - local ASR worker integration and automatic transcript attachment;
-- word-text correction and explicit clip in/out controls;
+- word-text correction;
 - optional non-manipulative practice-streak decision;
 - real transparent always-on-top Tauri live-assist window and global shortcut.
 
@@ -2100,7 +2102,7 @@ Tasks:
 - [x] Show transcript and sentence boundaries.
 - [x] Show allowed-note intervals.
 - [x] Add user annotations and bookmarks.
-- [ ] Add clip in/out points, but do not yet promote automatically to a dataset.
+- [x] Add clip in/out points, but do not yet promote automatically to a dataset.
 - [x] Export a session report as Markdown/JSON.
 
 ### 12.8 Work package P2-F — Progress system

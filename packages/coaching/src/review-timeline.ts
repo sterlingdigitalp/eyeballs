@@ -5,6 +5,7 @@ import type {
   GazePrediction,
   GazeState,
   ReviewBookmark,
+  ReviewClip,
   SessionManifest,
 } from "../../contracts/src";
 import type { SentenceBoundary, SpeakingWindow } from "./speaking";
@@ -47,6 +48,7 @@ export interface ReviewTimelineInput {
   speakingWindows?: SpeakingWindow[];
   sentences?: SentenceBoundary[];
   bookmarks?: ReviewBookmark[];
+  reviewClips?: ReviewClip[];
   /** Countdown / app pause intervals to exclude from metrics. */
   exclusions?: MetricExclusionWindow[];
 }
@@ -163,6 +165,17 @@ export function bookmarkMarkers(
   }));
 }
 
+export function reviewClipSegments(
+  clips: ReviewClip[] | undefined,
+): TimelineSegment[] {
+  return (clips ?? []).map((clip, index) => ({
+    startUs: clip.startUs,
+    endUs: clip.endUs,
+    label: clip.note ?? `review-clip-${index + 1}`,
+    kind: "review_clip",
+  }));
+}
+
 /** Multi-lane review timeline used by the Review UI. */
 export function buildReviewLanes(input: ReviewTimelineInput): ReviewLane[] {
   const durationUs = clampDuration(input.durationUs);
@@ -212,6 +225,12 @@ export function buildReviewLanes(input: ReviewTimelineInput): ReviewLane[] {
       name: "Bookmarks",
       segments: [],
       markers: bookmarkMarkers(input.bookmarks),
+    },
+    {
+      id: "clips",
+      name: "Review clips",
+      segments: reviewClipSegments(input.reviewClips),
+      markers: [],
     },
   ];
 }
@@ -344,6 +363,7 @@ export interface SessionReport {
     speakingSeconds: number;
     bookmarkCount: number;
     sentenceCount: number;
+    reviewClipCount: number;
     contactRatio?: number;
     drillId?: string;
     feedbackIntensity?: string;
@@ -363,6 +383,7 @@ export function buildSessionReport(args: {
   speakingWindows?: SpeakingWindow[];
   sentences?: SentenceBoundary[];
   bookmarks?: ReviewBookmark[];
+  reviewClips?: ReviewClip[];
   exclusions?: MetricExclusionWindow[];
 }): SessionReport {
   const lanes = buildReviewLanes({
@@ -375,6 +396,7 @@ export function buildSessionReport(args: {
     speakingWindows: args.speakingWindows,
     sentences: args.sentences,
     bookmarks: args.bookmarks,
+    reviewClips: args.reviewClips,
     exclusions: args.exclusions,
   });
   const scored = predictionsForCoachingMetrics(args.predictions, {
@@ -389,6 +411,7 @@ export function buildSessionReport(args: {
   const spokenSeconds = speakingSeconds(args.speakingWindows ?? []);
   const bookmarkCount = args.bookmarks?.length ?? 0;
   const sentenceCount = args.sentences?.length ?? 0;
+  const reviewClipCount = args.reviewClips?.length ?? 0;
   const markdown = [
     `# Session report`,
     ``,
@@ -405,6 +428,7 @@ export function buildSessionReport(args: {
     `- Speaking: ${spokenSeconds.toFixed(1)}s`,
     `- Bookmarks: ${bookmarkCount}`,
     `- Sentences: ${sentenceCount}`,
+    `- Review clips: ${reviewClipCount}`,
     ``,
     `## Lanes`,
     ...lanes.map(
@@ -425,6 +449,7 @@ export function buildSessionReport(args: {
       speakingSeconds: spokenSeconds,
       bookmarkCount,
       sentenceCount,
+      reviewClipCount,
       contactRatio,
       drillId: args.manifest.coaching?.drillId,
       feedbackIntensity: args.manifest.coaching?.feedbackIntensity,
