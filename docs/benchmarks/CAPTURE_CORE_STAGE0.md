@@ -197,6 +197,5 @@ Live camera under Tauri uses the same supervisor as Terminal Stage 2; agent CI p
 
 ## Next
 
-1. ~~Stages 1–4~~ **COMPLETE**.  
-2. Stage 5: measured low-rate preview / analysis transport.  
-3. Stage 6: 1h soak + failure matrix → ADR-004 Accepted.
+1. ~~Stages 1–5~~ **COMPLETE** (Stage 5: `docs/benchmarks/CAPTURE_CORE_STAGE5_PREVIEW.md`).  
+2. Stage 6: 1h soak + failure matrix → ADR-004 Accepted.

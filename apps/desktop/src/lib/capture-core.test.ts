@@ -7,7 +7,7 @@ import {
   isCaptureCoreVerticalSliceComplete,
   type CaptureProfile,
 } from "../../../../packages/contracts/src";
-import { summarizeCaptureCoreEvent } from "./capture-core";
+import { previewFrameFromEvent, summarizeCaptureCoreEvent } from "./capture-core";
 
 const profile = (): CaptureProfile =>
   captureProfileSchema.parse({
@@ -103,5 +103,34 @@ describe("Stage 4 vertical slice gate", () => {
         segmentHashes: [{ sha256: "a".repeat(64), byteLength: 12 }],
       }),
     ).toBe(false);
+  });
+});
+
+describe("Stage 5 preview transport", () => {
+  it("summarizes preview_frame events", () => {
+    expect(
+      summarizeCaptureCoreEvent({
+        type: "preview_frame",
+        payload: { jpegBytes: 1200, encodeMs: 2.5 },
+      }),
+    ).toContain("1200 bytes");
+  });
+
+  it("maps preview_frame to a display path", () => {
+    const frame = previewFrameFromEvent({
+      type: "preview_frame",
+      payload: {
+        path: "/tmp/session/preview/latest.jpg",
+        sequence: 3,
+        width: 640,
+        height: 360,
+        jpegBytes: 9000,
+      },
+    });
+    expect(frame?.path).toBe("/tmp/session/preview/latest.jpg");
+    expect(frame?.sequence).toBe(3);
+    // Outside Tauri, displaySrc is the raw path; under Tauri it becomes convertFileSrc + ?s=
+    expect(frame?.displaySrc).toContain("latest.jpg");
+    expect(frame?.width).toBe(640);
   });
 });

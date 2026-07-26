@@ -18,6 +18,12 @@ struct RecordRequest: Codable {
     var dryRun: Bool?
     /// Prefer Linear PCM audio masters when true (default). AAC when false.
     var preferPcmAudio: Bool?
+    /// Stage 5: emit low-rate JPEG preview files for Dataset framing (default true).
+    var previewEnabled: Bool?
+    /// Cap preview rate (fps). Default 5. Never a full-rate analysis path.
+    var previewMaxFps: Double?
+    /// Max preview width in pixels (height scales). Default 640.
+    var previewMaxWidth: Int?
 
     struct VideoSettings: Codable {
         var width: Int
@@ -38,6 +44,20 @@ struct RecordRequest: Codable {
 
     var resolvedPreferPcmAudio: Bool {
         preferPcmAudio ?? true
+    }
+
+    var resolvedPreviewEnabled: Bool {
+        previewEnabled ?? true
+    }
+
+    var resolvedPreviewMaxFps: Double {
+        let value = previewMaxFps ?? 5
+        return min(10, max(1, value))
+    }
+
+    var resolvedPreviewMaxWidth: Int {
+        let value = previewMaxWidth ?? 640
+        return min(1280, max(160, value))
     }
 }
 

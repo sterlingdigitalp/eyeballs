@@ -25,10 +25,13 @@ OUT="$SESSION/events.jsonl"
 grep -q '"type":"recording_finished"' "$OUT"
 grep -q '"type":"segment_finalized"' "$OUT"
 grep -q '"state":"finished"' "$OUT"
+# Stage 5: low-rate file preview protocol
+grep -q '"type":"preview_frame"' "$OUT"
 # Multi-segment dry-run (1 / 0.4 → 3 placeholders)
 test -f "$SESSION/master/segments/seg_000_video.mov"
 test -f "$SESSION/master/segments/seg_001_video.mov"
 test -f "$SESSION/master/segments/seg_002_video.mov"
+test -f "$SESSION/preview/latest.jpg"
 # On-disk seal for orphan scan (Swift side)
 test -f "$SESSION/recording-finished.json"
 grep -q '"status"[[:space:]]*:[[:space:]]*"complete"' "$SESSION/recording-finished.json"

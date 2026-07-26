@@ -1,9 +1,13 @@
 @preconcurrency import AVFoundation
+import CoreImage
 import Foundation
+import ImageIO
+import UniformTypeIdentifiers
 
 /// Sample-buffer capture session with segmented masters.
 /// Video: AVAssetWriter → master/segments/seg_NNN_video.mov
 /// Audio: AVAssetWriter → master/segments/seg_NNN_audio.caf (PCM)
+/// Preview: low-rate JPEG under sessionRoot/preview/latest.jpg (Stage 5 framing only)
 final class CaptureRecorder: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureAudioDataOutputSampleBufferDelegate {
     private let request: RecordRequest
     private let protocolWriter: ProtocolWriter
@@ -37,6 +41,14 @@ final class CaptureRecorder: NSObject, AVCaptureVideoDataOutputSampleBufferDeleg
     private var negotiatedFrameRate: Double = 0
     private var finalizedSegmentCount: Int = 0
 
+    // Stage 5 preview metrics
+    private var previewSequence: UInt64 = 0
+    private var previewFramesEmitted: UInt64 = 0
+    private var lastPreviewAt: CFTimeInterval = 0
+    private var lastPreviewEncodeMs: Double = 0
+    private var lastPreviewJpegBytes: Int = 0
+    private let ciContext = CIContext(options: [.useSoftwareRenderer: false])
+
     private var isStopping = false
     private var isCancelled = false
     private var sessionRunning = false
@@ -44,6 +56,7 @@ final class CaptureRecorder: NSObject, AVCaptureVideoDataOutputSampleBufferDeleg
 
     private let fileManager = FileManager.default
     private var segmentsDir: URL
+    private var previewDir: URL
 
     init(request: RecordRequest, protocolWriter: ProtocolWriter) throws {
         self.request = request
@@ -52,8 +65,12 @@ final class CaptureRecorder: NSObject, AVCaptureVideoDataOutputSampleBufferDeleg
         self.segmentsDir = root
             .appendingPathComponent("master", isDirectory: true)
             .appendingPathComponent("segments", isDirectory: true)
+        self.previewDir = root.appendingPathComponent("preview", isDirectory: true)
         super.init()
         try fileManager.createDirectory(at: segmentsDir, withIntermediateDirectories: true)
+        if request.resolvedPreviewEnabled {
+            try fileManager.createDirectory(at: previewDir, withIntermediateDirectories: true)
+        }
     }
 
     func run() async -> CaptureCoreExitCode {
@@ -126,6 +143,9 @@ final class CaptureRecorder: NSObject, AVCaptureVideoDataOutputSampleBufferDeleg
         let configuredSeg = request.segmentDurationSec ?? min(1.0, total)
         let segmentLen = min(max(0.25, configuredSeg), max(0.25, total))
         let segmentCount = max(1, Int(ceil(total / segmentLen - 1e-9)))
+        if request.resolvedPreviewEnabled {
+            emitDryRunPreviewPlaceholders(count: min(3, max(1, segmentCount)))
+        }
         protocolWriter.emit(
             type: "health",
             payload: [
@@ -134,6 +154,8 @@ final class CaptureRecorder: NSObject, AVCaptureVideoDataOutputSampleBufferDeleg
                 "segmentIndex": 0,
                 "plannedSegments": segmentCount,
                 "segmentDurationSec": segmentLen,
+                "previewEnabled": request.resolvedPreviewEnabled,
+                "previewMaxFps": request.resolvedPreviewMaxFps,
                 "diskFreeBytes": freeDiskBytes(at: segmentsDir) ?? -1,
             ]
         )
@@ -202,6 +224,8 @@ final class CaptureRecorder: NSObject, AVCaptureVideoDataOutputSampleBufferDeleg
 
     private func emitHealth(type: String) {
         let diskFree = freeDiskBytes(at: segmentsDir) ?? -1
+        let elapsed = max(0.001, CFAbsoluteTimeGetCurrent() - recordingStartedAt)
+        let previewFps = Double(previewFramesEmitted) / elapsed
         var payload: [String: Any] = [
             "state": isStopping ? "stopping" : "recording",
             "segmentIndex": segmentIndex,
@@ -216,10 +240,139 @@ final class CaptureRecorder: NSObject, AVCaptureVideoDataOutputSampleBufferDeleg
             "negotiatedHeight": negotiatedHeight,
             "negotiatedFrameRate": negotiatedFrameRate,
             "segmentDurationSec": request.resolvedSegmentDurationSec,
+            "previewEnabled": request.resolvedPreviewEnabled,
+            "previewMaxFps": request.resolvedPreviewMaxFps,
+            "previewFrames": Int(previewFramesEmitted),
+            "previewAchievedFps": previewFps,
+            "lastPreviewEncodeMs": lastPreviewEncodeMs,
+            "lastPreviewJpegBytes": lastPreviewJpegBytes,
         ]
         if let firstVideoPtsUs { payload["firstVideoPtsUs"] = firstVideoPtsUs }
         if let firstAudioPtsUs { payload["firstAudioPtsUs"] = firstAudioPtsUs }
         protocolWriter.emit(type: type, payload: payload)
+    }
+
+    /// Stage 5 dry-run: solid-color JPEGs so protocol + file transport can be tested without camera.
+    private func emitDryRunPreviewPlaceholders(count: Int) {
+        let width = min(request.resolvedPreviewMaxWidth, 320)
+        let height = max(1, width * 9 / 16)
+        for _ in 0..<count {
+            let color = CIColor(red: 0.08, green: 0.22, blue: 0.18, alpha: 1)
+            let image = CIImage(color: color).cropped(
+                to: CGRect(x: 0, y: 0, width: width, height: height)
+            )
+            let started = CFAbsoluteTimeGetCurrent()
+            if let path = writePreviewJPEG(ciImage: image) {
+                let encodeMs = (CFAbsoluteTimeGetCurrent() - started) * 1000
+                previewSequence += 1
+                previewFramesEmitted += 1
+                lastPreviewEncodeMs = encodeMs
+                lastPreviewAt = CFAbsoluteTimeGetCurrent()
+                if let attrs = try? fileManager.attributesOfItem(atPath: path),
+                   let size = attrs[.size] as? NSNumber
+                {
+                    lastPreviewJpegBytes = size.intValue
+                }
+                protocolWriter.emit(
+                    type: "preview_frame",
+                    payload: [
+                        "path": path,
+                        "sequence": Int(previewSequence),
+                        "width": width,
+                        "height": height,
+                        "jpegBytes": lastPreviewJpegBytes,
+                        "encodeMs": encodeMs,
+                        "previewMaxFps": request.resolvedPreviewMaxFps,
+                        "transport": "file",
+                        "dryRun": true,
+                    ]
+                )
+            }
+        }
+    }
+
+    /// Write atomic `preview/latest.jpg` from a CIImage; returns absolute path.
+    private func writePreviewJPEG(ciImage: CIImage) -> String? {
+        guard let cgImage = ciContext.createCGImage(ciImage, from: ciImage.extent) else {
+            return nil
+        }
+        let finalURL = previewDir.appendingPathComponent("latest.jpg")
+        let tempURL = previewDir.appendingPathComponent("latest.jpg.tmp")
+        try? fileManager.removeItem(at: tempURL)
+        guard let dest = CGImageDestinationCreateWithURL(
+            tempURL as CFURL,
+            UTType.jpeg.identifier as CFString,
+            1,
+            nil
+        ) else {
+            return nil
+        }
+        let options: [CFString: Any] = [
+            kCGImageDestinationLossyCompressionQuality: 0.55,
+        ]
+        CGImageDestinationAddImage(dest, cgImage, options as CFDictionary)
+        guard CGImageDestinationFinalize(dest) else {
+            try? fileManager.removeItem(at: tempURL)
+            return nil
+        }
+        do {
+            if fileManager.fileExists(atPath: finalURL.path) {
+                _ = try fileManager.replaceItemAt(finalURL, withItemAt: tempURL)
+            } else {
+                try fileManager.moveItem(at: tempURL, to: finalURL)
+            }
+            return finalURL.path
+        } catch {
+            protocolWriter.log("preview write failed: \(error.localizedDescription)")
+            try? fileManager.removeItem(at: tempURL)
+            return nil
+        }
+    }
+
+    private func maybeEmitPreview(from sampleBuffer: CMSampleBuffer) {
+        guard request.resolvedPreviewEnabled, !isStopping else { return }
+        let now = CFAbsoluteTimeGetCurrent()
+        let minInterval = 1.0 / request.resolvedPreviewMaxFps
+        guard now - lastPreviewAt >= minInterval else { return }
+        guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+
+        let started = now
+        var image = CIImage(cvPixelBuffer: pixelBuffer)
+        let maxW = CGFloat(request.resolvedPreviewMaxWidth)
+        let extent = image.extent
+        if extent.width > maxW, extent.width > 1 {
+            let scale = maxW / extent.width
+            image = image.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+        }
+        guard let path = writePreviewJPEG(ciImage: image) else { return }
+        let encodeMs = (CFAbsoluteTimeGetCurrent() - started) * 1000
+        previewSequence += 1
+        previewFramesEmitted += 1
+        lastPreviewAt = CFAbsoluteTimeGetCurrent()
+        lastPreviewEncodeMs = encodeMs
+        var jpegBytes = 0
+        if let attrs = try? fileManager.attributesOfItem(atPath: path),
+           let size = attrs[.size] as? NSNumber
+        {
+            jpegBytes = size.intValue
+            lastPreviewJpegBytes = jpegBytes
+        }
+        let outW = Int(image.extent.width.rounded())
+        let outH = Int(image.extent.height.rounded())
+        protocolWriter.emit(
+            type: "preview_frame",
+            payload: [
+                "path": path,
+                "sequence": Int(previewSequence),
+                "width": outW,
+                "height": outH,
+                "jpegBytes": jpegBytes,
+                "encodeMs": encodeMs,
+                "previewMaxFps": request.resolvedPreviewMaxFps,
+                "transport": "file",
+                "videoFrameIndex": Int(videoFrames),
+            ]
+        )
     }
 
     private enum CaptureSetupError: Error {
@@ -657,6 +810,8 @@ final class CaptureRecorder: NSObject, AVCaptureVideoDataOutputSampleBufferDeleg
                     // audio session may start on first audio buffer
                 }
             }
+            // Stage 5: low-rate framing preview (file transport; never full-rate base64).
+            maybeEmitPreview(from: sampleBuffer)
             guard let input = videoInput, input.isReadyForMoreMediaData else {
                 droppedVideo += 1
                 return

@@ -193,11 +193,12 @@ Evidence: `scripts/dev/test-capture-core-stage4-vertical.sh`, cargo `stage4_vert
 
 ### 5. Preview/analysis transport — 1–2 weeks
 
-- [ ] Measured low-rate preview first.
-- [ ] Full-rate analysis path only after benchmark report.
-- [ ] Still no dual camera ownership.
+- [x] Measured low-rate preview first (≤5 fps JPEG file + `preview_frame` metrics).
+- [x] Full-rate analysis path only after benchmark report (deferred; design recorded in Stage 5 notes).
+- [x] Still no dual camera ownership (webview released; CaptureCore owns devices).
 
-**Exit:** framing UX acceptable; optional coaching path designed with numbers.
+**Exit:** framing UX acceptable; optional coaching path designed with numbers. **MET** (2026-07-26).  
+Evidence: `docs/benchmarks/CAPTURE_CORE_STAGE5_PREVIEW.md`, Dataset framing panel, dry-run `preview_frame` + `preview/latest.jpg`.
 
 ### 6. Hardening — 1–2 weeks
 

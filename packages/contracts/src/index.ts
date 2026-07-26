@@ -101,6 +101,10 @@ export const captureCoreRecordRequestSchema = z.object({
   dryRun: z.boolean().optional(),
   /** Prefer Linear PCM audio masters (CaptureCore default true). */
   preferPcmAudio: z.boolean().optional(),
+  /** Stage 5: low-rate JPEG framing preview (default true in CaptureCore). */
+  previewEnabled: z.boolean().optional(),
+  previewMaxFps: z.number().positive().max(10).optional(),
+  previewMaxWidth: z.number().int().positive().max(1280).optional(),
 });
 export type CaptureCoreRecordRequest = z.infer<typeof captureCoreRecordRequestSchema>;
 
@@ -109,6 +113,10 @@ export const CAPTURE_CORE_DEFAULT_SEGMENT_SEC = 10;
 
 /** Charter Stage 4 vertical-slice live duration (seconds). */
 export const CAPTURE_CORE_VERTICAL_SLICE_SEC = 30;
+
+/** Stage 5 measured low-rate preview defaults (not an analysis pipeline). */
+export const CAPTURE_CORE_PREVIEW_MAX_FPS = 5;
+export const CAPTURE_CORE_PREVIEW_MAX_WIDTH = 640;
 
 /** True when a CaptureCore run produced a Rust seal and at least one hashed segment. */
 export function isCaptureCoreVerticalSliceComplete(result: {
@@ -167,6 +175,9 @@ export function buildCaptureCoreRecordRequest(input: {
   dryRun?: boolean;
   videoOnly?: boolean;
   preferPcmAudio?: boolean;
+  previewEnabled?: boolean;
+  previewMaxFps?: number;
+  previewMaxWidth?: number;
 }): CaptureCoreRecordRequest {
   const ids = captureCoreDeviceIds(input.profile);
   const video = input.profile.negotiatedVideo ?? input.profile.requestedVideo;
@@ -193,6 +204,9 @@ export function buildCaptureCoreRecordRequest(input: {
     videoOnly: input.videoOnly,
     dryRun: input.dryRun,
     preferPcmAudio: input.preferPcmAudio,
+    previewEnabled: input.previewEnabled ?? true,
+    previewMaxFps: input.previewMaxFps ?? CAPTURE_CORE_PREVIEW_MAX_FPS,
+    previewMaxWidth: input.previewMaxWidth ?? CAPTURE_CORE_PREVIEW_MAX_WIDTH,
   });
 }
 

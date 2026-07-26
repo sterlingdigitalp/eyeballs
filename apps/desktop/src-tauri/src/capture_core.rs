@@ -35,6 +35,12 @@ pub struct CaptureRecordRequest {
     pub dry_run: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub prefer_pcm_audio: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preview_enabled: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preview_max_fps: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preview_max_width: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -208,14 +214,15 @@ pub fn resolve_capture_core_binary() -> Result<PathBuf, String> {
     }
 
     for root in repo_root_candidates() {
-        search_dirs.push(root.join("binaries"));
-        search_dirs.push(root.join("apps/desktop/src-tauri/binaries"));
+        // Prefer freshly built Swift products over a possibly stale staged sidecar.
         search_dirs.push(root.join("native/capture-macos/.build/arm64-apple-macosx/debug"));
         search_dirs.push(root.join("native/capture-macos/.build/debug"));
         search_dirs.push(root.join("native/capture-macos/.build/x86_64-apple-macosx/debug"));
         search_dirs.push(root.join("native/capture-macos/.build/arm64-apple-macosx/release"));
         search_dirs.push(root.join("native/capture-macos/.build/release"));
         search_dirs.push(root.join("native/capture-macos/.build/CaptureCore.app/Contents/MacOS"));
+        search_dirs.push(root.join("binaries"));
+        search_dirs.push(root.join("apps/desktop/src-tauri/binaries"));
     }
 
     for dir in search_dirs {
@@ -635,6 +642,9 @@ mod tests {
             video_only: None,
             dry_run: Some(true),
             prefer_pcm_audio: None,
+            preview_enabled: Some(true),
+            preview_max_fps: Some(5.0),
+            preview_max_width: Some(640),
         };
         let result = run_capture_record_with_hooks(
             request,
@@ -651,6 +661,10 @@ mod tests {
             .events
             .iter()
             .any(|e| e.get("type").and_then(|t| t.as_str()) == Some("recording_finished")));
+        assert!(result
+            .events
+            .iter()
+            .any(|e| e.get("type").and_then(|t| t.as_str()) == Some("preview_frame")));
         assert!(session_root
             .join("master")
             .join("segments")
@@ -662,6 +676,7 @@ mod tests {
             .join("segments")
             .join("seg_002_video.mov")
             .is_file());
+        assert!(session_root.join("preview").join("latest.jpg").is_file());
         assert!(session_root.join("recording-finished.json").is_file());
         assert!(result.seal_path.is_some());
         assert!(session_root.join("session-seal.json").is_file());
@@ -697,6 +712,9 @@ mod tests {
             video_only: None,
             dry_run: Some(true),
             prefer_pcm_audio: None,
+            preview_enabled: Some(true),
+            preview_max_fps: Some(5.0),
+            preview_max_width: Some(640),
         };
         let result = run_capture_record_with_hooks(
             request,

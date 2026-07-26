@@ -1,8 +1,10 @@
-import { invoke } from "@tauri-apps/api/core";
+import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import {
   buildCaptureCoreRecordRequest,
   CAPTURE_CORE_DEFAULT_SEGMENT_SEC,
+  CAPTURE_CORE_PREVIEW_MAX_FPS,
+  CAPTURE_CORE_PREVIEW_MAX_WIDTH,
   CAPTURE_CORE_VERTICAL_SLICE_SEC,
   captureCoreDeviceInventorySchema,
   captureCoreRunResultSchema,
@@ -203,7 +205,16 @@ export function summarizeCaptureCoreEvent(event: CaptureCoreProtocolEvent): stri
   if (type === "health") {
     const frames = payload.videoFrames ?? payload.video_frames ?? "—";
     const seg = payload.segmentIndex ?? payload.segment_index ?? "—";
-    return `Recording · segment ${seg} · ${frames} frames`;
+    const previewFps = payload.previewAchievedFps;
+    const previewPart =
+      typeof previewFps === "number" ? ` · preview ${previewFps.toFixed(1)} fps` : "";
+    return `Recording · segment ${seg} · ${frames} frames${previewPart}`;
+  }
+  if (type === "preview_frame") {
+    const bytes = payload.jpegBytes ?? "—";
+    const encodeMs = payload.encodeMs;
+    const encodePart = typeof encodeMs === "number" ? ` · ${encodeMs.toFixed(1)} ms encode` : "";
+    return `Preview frame · ${bytes} bytes${encodePart}`;
   }
   if (type === "segment_finalized") {
     const seg = payload.segmentIndex ?? payload.segment_index ?? "—";
@@ -218,9 +229,51 @@ export function summarizeCaptureCoreEvent(event: CaptureCoreProtocolEvent): stri
   return type;
 }
 
+export type CaptureCorePreviewFrame = {
+  path: string;
+  sequence: number;
+  width?: number;
+  height?: number;
+  jpegBytes?: number;
+  encodeMs?: number;
+  /** Webview-safe URL for the JPEG file (Tauri asset protocol). */
+  displaySrc: string;
+};
+
+/** Extract preview_frame payload into a displayable framing still. */
+export function previewFrameFromEvent(
+  event: CaptureCoreProtocolEvent,
+): CaptureCorePreviewFrame | undefined {
+  if (event.type !== "preview_frame") return undefined;
+  const payload = event.payload ?? {};
+  const path = typeof payload.path === "string" ? payload.path : undefined;
+  if (!path) return undefined;
+  const sequence = typeof payload.sequence === "number" ? payload.sequence : 0;
+  let displaySrc = path;
+  if (isTauri()) {
+    try {
+      // Cache-bust so the same path (latest.jpg) reloads when replaced.
+      displaySrc = `${convertFileSrc(path)}?s=${sequence}`;
+    } catch {
+      displaySrc = path;
+    }
+  }
+  return {
+    path,
+    sequence,
+    width: typeof payload.width === "number" ? payload.width : undefined,
+    height: typeof payload.height === "number" ? payload.height : undefined,
+    jpegBytes: typeof payload.jpegBytes === "number" ? payload.jpegBytes : undefined,
+    encodeMs: typeof payload.encodeMs === "number" ? payload.encodeMs : undefined,
+    displaySrc,
+  };
+}
+
 export {
   buildCaptureCoreRecordRequest,
   CAPTURE_CORE_DEFAULT_SEGMENT_SEC,
+  CAPTURE_CORE_PREVIEW_MAX_FPS,
+  CAPTURE_CORE_PREVIEW_MAX_WIDTH,
   CAPTURE_CORE_VERTICAL_SLICE_SEC,
   isCaptureCoreVerticalSliceComplete,
   reconcileDeviceBindings,

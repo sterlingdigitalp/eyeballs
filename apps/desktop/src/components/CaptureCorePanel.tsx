@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   CAPTURE_CORE_DEFAULT_SEGMENT_SEC,
+  CAPTURE_CORE_PREVIEW_MAX_FPS,
+  CAPTURE_CORE_PREVIEW_MAX_WIDTH,
   CAPTURE_CORE_VERTICAL_SLICE_SEC,
   isCaptureCoreVerticalSliceComplete,
   shortSha256,
@@ -18,7 +20,9 @@ import {
   captureCoreVerticalSlice,
   isCaptureCoreHostAvailable,
   listenCaptureCoreEvents,
+  previewFrameFromEvent,
   summarizeCaptureCoreEvent,
+  type CaptureCorePreviewFrame,
   type CaptureCoreProtocolEvent,
 } from "../lib/capture-core";
 import { logEvent } from "../lib/logging";
@@ -49,6 +53,8 @@ export function CaptureCorePanel({ profile, onReleaseMedia, onProfilePatched }: 
   const [liveSeconds, setLiveSeconds] = useState(CAPTURE_CORE_VERTICAL_SLICE_SEC);
   const [progress, setProgress] = useState<string>();
   const [liveEvent, setLiveEvent] = useState<CaptureCoreProtocolEvent>();
+  const [preview, setPreview] = useState<CaptureCorePreviewFrame>();
+  const [previewStats, setPreviewStats] = useState<string>();
 
   const refreshOrphans = useCallback(async () => {
     if (!host) return;
@@ -86,6 +92,26 @@ export function CaptureCorePanel({ profile, onReleaseMedia, onProfilePatched }: 
       if (!active) return;
       setLiveEvent(event);
       setProgress(summarizeCaptureCoreEvent(event));
+      const frame = previewFrameFromEvent(event);
+      if (frame) {
+        setPreview(frame);
+        const parts = [
+          frame.width && frame.height ? `${frame.width}×${frame.height}` : undefined,
+          frame.jpegBytes != null ? `${frame.jpegBytes} B` : undefined,
+          frame.encodeMs != null ? `${frame.encodeMs.toFixed(1)} ms` : undefined,
+          `≤${CAPTURE_CORE_PREVIEW_MAX_FPS} fps · file transport`,
+        ].filter(Boolean);
+        setPreviewStats(parts.join(" · "));
+      }
+      if (event.type === "health" && event.payload) {
+        const achieved = event.payload.previewAchievedFps;
+        if (typeof achieved === "number") {
+          setPreviewStats((prev) => {
+            const base = prev?.replace(/\s*· achieved .*$/, "") ?? `≤${CAPTURE_CORE_PREVIEW_MAX_FPS} fps · file transport`;
+            return `${base} · achieved ${achieved.toFixed(2)} fps`;
+          });
+        }
+      }
     }).then((fn) => {
       unlisten = fn;
     });
@@ -114,6 +140,8 @@ export function CaptureCorePanel({ profile, onReleaseMedia, onProfilePatched }: 
           : "Starting live record…",
     );
     setLiveEvent(undefined);
+    setPreview(undefined);
+    setPreviewStats(undefined);
     onReleaseMedia();
     try {
       const result = await action();
@@ -239,11 +267,12 @@ export function CaptureCorePanel({ profile, onReleaseMedia, onProfilePatched }: 
   return (
     <section className="screen dataset-screen">
       <div className="screen-copy">
-        <p className="eyebrow">Dataset · Stage 4</p>
+        <p className="eyebrow">Dataset · Stage 4–5</p>
         <h1>CaptureCore masters</h1>
         <p className="lede">
-          One primary action: run the vertical slice. The practice camera is released first;
-          closed segments are SHA-256 sealed in Rust under Application Support.
+          Practice camera is released first — CaptureCore owns the devices. Low-rate JPEG
+          preview (≤{CAPTURE_CORE_PREVIEW_MAX_FPS} fps, ≤{CAPTURE_CORE_PREVIEW_MAX_WIDTH}px) is for
+          framing only, not full-rate analysis.
         </p>
       </div>
 
@@ -380,6 +409,25 @@ export function CaptureCorePanel({ profile, onReleaseMedia, onProfilePatched }: 
         </div>
 
         <div className="panel">
+          <h2>Framing preview</h2>
+          <div className="dataset-preview">
+            {preview ? (
+              <img
+                src={preview.displaySrc}
+                alt="CaptureCore framing preview"
+                width={preview.width}
+                height={preview.height}
+              />
+            ) : (
+              <div className="dataset-preview-empty">
+                {busy
+                  ? "Waiting for first preview frame…"
+                  : "Preview appears while a slice is running (CaptureCore-owned camera)."}
+              </div>
+            )}
+          </div>
+          {previewStats && <p className="format dataset-preview-stats">{previewStats}</p>}
+
           <h2>Last seal</h2>
           {!lastRun && (
             <p className="muted dataset-empty">
@@ -404,6 +452,10 @@ export function CaptureCorePanel({ profile, onReleaseMedia, onProfilePatched }: 
             <summary>Developer details</summary>
             <p className="muted">Sessions root: {sessionsRoot ?? "—"}</p>
             <p className="muted">CaptureCore binary: {binaryPath ?? "—"}</p>
+            <p className="muted">
+              Preview: file transport · max {CAPTURE_CORE_PREVIEW_MAX_FPS} fps · max width{" "}
+              {CAPTURE_CORE_PREVIEW_MAX_WIDTH}px · no webview dual-own
+            </p>
             {lastRun && (
               <p className="muted">
                 Session: {lastRun.sessionRoot}
