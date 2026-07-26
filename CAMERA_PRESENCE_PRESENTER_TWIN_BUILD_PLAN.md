@@ -3,7 +3,7 @@ title: "Camera Presence Coach & Presenter Twin — Complete Build Plan"
 version: "1.1"
 date: "2026-07-25"
 last_progress_update: "2026-07-26"
-status: "Phase 1 engineering largely complete (hardware acceptance open); Phase 2 integrated coaching prototype under MVP hardening; Phase 3 domain scaffolding/UI prototype on this branch. CaptureCore is implemented through Stage 5 on feature/capture-core; Stage 6 hardware hardening and soaks are in progress"
+status: "Phase 1 engineering largely complete, with top-monitor Brio calibration/classification reopened by live evidence; Phase 2 integrated coaching prototype under MVP hardening; Phase 3 domain scaffolding/UI prototype on this branch. CaptureCore is implemented through Stage 5 on feature/capture-core; its first Brio+Yeti one-hour Stage 6 soak passed"
 platform_priority: "macOS first, local-first"
 working_product_name: "Camera Presence Coach"
 ---
@@ -1536,11 +1536,11 @@ hardware exercises.
 | Device/profile layer | Complete; final hardware exercises open | Separate camera/microphone permission controls, stable device inventory, profile editing, disconnected-device visibility, negotiated settings, 720p/1080p/4K choices, live dBFS meter, attach/detach and track-ended handling |
 | Capture path | Selected and implemented | Webview capture is the Phase 1 live path; native AVFoundation/Vision helpers remain benchmark and validation tools |
 | Tracking | Implemented; final promotion evidence open | MediaPipe Face Landmarker is the provisional live provider; Apple Vision and MediaPipe share a versioned feature contract and benchmark harness, but the final same-human-corpus comparison remains open |
-| Calibration | Complete; fresh profile runs open | Self-guided 13-step training plus randomized 11-target validation, five-second settle and collection holds, audible transitions, weak-target recapture, per-target quality gates, persistence, revalidation, and invalidation |
-| Classifier | Complete and verified mechanically | Personalized robust centers, class probabilities, ambiguity/out-of-distribution abstention, explicit `unknown`, hysteresis, blink suppression, gaze-break/recovery events, and offline reprocessing |
+| Calibration | UX complete; top-monitor acceptance blocked | Self-guided 13-step training plus randomized 11-target validation, five-second settle and collection holds, audible transitions, weak-target recapture, per-target quality gates, persistence, revalidation, and invalidation. Two 2026-07-26 real-world runs proved the instructions but exposed inadequate held-out classification at the top-monitor geometry. |
+| Classifier | Head-compensated redesign implemented; fresh confirmation open | Personalized robust centers, calibration-learned eye/head compensation, class probabilities, ambiguity/out-of-distribution abstention, explicit `unknown`, hysteresis, blink suppression, gaze-break/recovery events, and offline reprocessing. The two retained top-monitor runs now pass the production held-out gate offline; an independent fresh run is still required. |
 | Measurement/recording | Complete and verified mechanically | Practice and recording modes, optional video-only operation, media-clock alignment, dropped-frame capture, periodic and lifecycle checkpoints, finalization guards, and visible incomplete/invalid recovery |
 | Review/evaluation | Complete; human review open | Playback-aligned overlay and timeline, blind labeling, append-only corrections, exports, confusion/agreement/coverage/false-cue/event-timing metrics, and version comparison |
-| Automated verification | Pass | 81 TypeScript tests across 20 suites; Rust tests; Swift build; 240-frame native Vision fixture; renderer production build; strict code-sign/plist checks; zero known npm vulnerabilities |
+| Automated verification | Pass | 171 TypeScript tests across 47 suites; Rust tests; Swift build; 240-frame native Vision fixture; renderer production build; strict code-sign/plist checks; zero known npm vulnerabilities |
 | Current signed-bundle smoke | Pass | Setup, Calibration, Test, and Review rendered from the packaged app with devices off; no permission prompt or device activation occurred; the stale calibration was correctly rejected; the app quit cleanly |
 
 Current reproducibility identifiers:
@@ -1549,9 +1549,9 @@ Current reproducibility identifiers:
 tracking provider: mediapipe-face-landmarker
 tracker/model: 0.10.22/face-landmarker-float16-v1+pose-matrix.2
 calibration protocol: guided-personalized/2.0.1
-classifier: cluster-hysteresis/1.2.1
+classifier working tree: gaze-compensated-cluster/1.3.0 (fresh acceptance run pending)
 feature schema: 1.0.0
-packaged executable SHA-256: 88cf03b91ffe776bb8c9874ae2105fc6bda7926268d33eeb984a0a7e82a675cc
+packaged executable SHA-256: ed8e50227738a9aaf56c4eaeef2339c89dddaa0b5253ccda4411cd8613193a3d
 ```
 
 Calibration history and compatibility note:
@@ -1563,15 +1563,42 @@ Calibration history and compatibility note:
 - Run four is preserved for audit but is deliberately ineligible for activation. The next Brio
   calibration must use the current tracker/model and independent-validation protocol.
 - The MacBook profile still needs its first current-version calibration.
+- Two top-of-monitor Brio runs on 2026-07-26 were correctly rejected. The first scored 69% overall
+  and revealed that `CAMERA` could be read as the on-screen preview rather than the physical lens.
+  The clarified run used precise preview-local instructions and improved target compliance, but
+  scored 40% overall (23% at the physical lens). The user reported following the clarified
+  instructions precisely.
+- Stored feature inspection disproved a gross cue/sample-label offset: training and validation
+  eye-yaw means were closely paired for left (`0.0387`/`0.0480`), right
+  (`-0.0569`/`-0.0573`), screen center (`-0.0172`/`-0.0044`), and physical lens
+  (`-0.0225`/`-0.0298`). The remaining blocker is feature/prototype overlap and posture drift,
+  especially physical lens versus screen/near-lens targets.
+- An intermediate correction stopped same-state target prototypes from falsely competing with one
+  another, but that alone improved the latest run only from 39.9% to 41.4%.
+- `gaze-compensated-cluster/1.3.0` now learns yaw/pitch compensation from the explicit
+  head-left/right/down while-eyes-on-lens samples, compares compensated gaze plus residual head
+  pose, and treats just-above-lens as the same near-lens tolerance class as just-below-lens.
+  Production-code offline replay scores the two 2026-07-26 runs at 98.6% and 97.3% held-out
+  agreement respectively, with both quality gates passing. Because those retained runs informed
+  the redesign, they are engineering evidence rather than an independent acceptance result; one
+  fresh run remains required before activation.
 
 Pertinent product and test decisions:
 
-- All time-sensitive calibration instructions and transitions are shown above or inside the
-  preview because the user cannot see content below the preview while posed at the eye-level Brio.
+- During active calibration, the only visible instruction is rendered inside the preview. Cues are
+  terse and explicit (`SCREEN CENTER`, `LOOK LEFT`, `LOOK RIGHT`, `NOTES`, or a physical
+  `... LENS ↑` instruction). For physical-lens collection, the cue disappears at the high tone so
+  the preview cannot continue attracting the user's gaze; the low tone ends the hold.
+- Collection labeling now uses an immutable active-collection token created at the high tone and
+  cleared at the low tone, rather than mutable React render state. Structured events record the
+  phase, step ID, target, first/last feature timestamp, elapsed collection time, and sample count.
 - The physical-lens baseline uses a five-second settle interval followed by five seconds of
   collection so the eyes can settle before samples count.
-- The Brio is positioned at eye height. The physical camera lens—not the monitor—is the calibration
-  target.
+- The current real-world Brio position is centered on top of the 32-inch monitor, approximately
+  six inches above eye line and 2.5 feet from the user. The former eye-level tripod position is no
+  longer the operational geometry. The physical camera lens—not the monitor—is the lens target,
+  and the persisted profile should be renamed from `Brio Eye-Level` before the fresh acceptance
+  run so the geometry is not misrepresented.
 - The product owner accepted the 77.26-second, 2,319-frame Brio 4K/30 run as sufficient Phase 1
   transport-stability evidence. The proposed 30-minute Brio soak is therefore not an open gate.
 - The Yeti passed a discard-only 48 kHz stereo sample-flow check, and the Brio passed 4K/30 and
@@ -1581,7 +1608,8 @@ Pertinent product and test decisions:
 
 Remaining Phase 1 acceptance gates:
 
-- run a fresh current-version Brio calibration and first MacBook calibration;
+- run one fresh independent accepted Brio calibration with the packaged
+  `gaze-compensated-cluster/1.3.0`, then the first MacBook calibration;
 - verify at least 85% held-out agreement for both profiles with user labels;
 - demonstrate fewer than one false corrective cue per labeled minute;
 - run a simultaneous Brio + Yeti Studio profile and inspect live A/V synchronization and drops;
@@ -1988,7 +2016,8 @@ Implemented and covered by device-free tests:
 Still requiring live validation after CaptureCore releases the Brio and Yeti:
 
 - speech-synthesis voice and tone audibility in the packaged Tauri app;
-- one complete hands-free Level 1 run using the top-monitor Brio calibration;
+- one complete hands-free Level 1 run after the top-monitor Brio classifier blocker is resolved and
+  a current calibration passes;
 - movement-warning behavior across the four-display desk setup.
 
 Still open for later Phase 2 slices:

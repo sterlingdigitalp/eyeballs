@@ -5,6 +5,9 @@ describe("in-app calibration guide", () => {
   it("defines separate face and eye instructions for every target", () => {
     expect(Object.keys(CALIBRATION_GUIDES)).toHaveLength(11);
     for (const guide of Object.values(CALIBRATION_GUIDES)) {
+      const words = guide.shortInstruction.match(/[A-Z]+/g) ?? [];
+      expect(words.length).toBeGreaterThanOrEqual(1);
+      expect(words.length).toBeLessThanOrEqual(5);
       expect(guide.faceInstruction).toMatch(/^Face:/);
       expect(guide.eyeInstruction).toMatch(/^Eyes:/);
       expect(guide.markerLabel.length).toBeGreaterThan(0);

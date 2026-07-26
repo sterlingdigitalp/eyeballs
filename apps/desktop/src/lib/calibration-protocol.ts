@@ -33,6 +33,7 @@ export const TRAINING_CALIBRATION_STEPS: CalibrationProtocolStep[] = [
   }),
   step("lens-speaking", "lens", {
     title: "Lens baseline · speaking",
+    shortInstruction: "SPEAK · CAMERA LENS ↑",
     faceInstruction: "Face: use your normal speaking posture.",
     eyeInstruction:
       "Eyes: look into the physical glass camera lens while saying the sentence below.",

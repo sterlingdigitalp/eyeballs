@@ -87,6 +87,7 @@ describe("calibration", () => {
   it("uses the same binary contact definition as review metrics", () => {
     expect(isCalibrationContactTarget("lens")).toBe(true);
     expect(isCalibrationContactTarget("near_lens")).toBe(true);
+    expect(isCalibrationContactTarget("above_lens")).toBe(true);
     expect(isCalibrationContactTarget("head_left_eyes_lens")).toBe(true);
     expect(isCalibrationContactTarget("head_down_eyes_lens")).toBe(true);
     expect(isCalibrationContactTarget("left")).toBe(false);

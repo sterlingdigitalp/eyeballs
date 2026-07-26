@@ -10,6 +10,7 @@ export function isCalibrationContactTarget(target: CalibrationTarget): boolean {
   return (
     target === "lens" ||
     target === "near_lens" ||
+    target === "above_lens" ||
     target === "head_left_eyes_lens" ||
     target === "head_right_eyes_lens" ||
     target === "head_down_eyes_lens"

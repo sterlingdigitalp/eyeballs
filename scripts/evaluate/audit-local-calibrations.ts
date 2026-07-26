@@ -6,7 +6,11 @@ import {
   calibrationQualityGate,
   evaluateHeldOutCalibration,
 } from "../../packages/measurement/src/calibration";
-import { ALGORITHM_VERSION } from "../../packages/measurement/src/classifier";
+import {
+  ALGORITHM_VERSION,
+  classifyFrame,
+  trainClassifier,
+} from "../../packages/measurement/src/classifier";
 import {
   MEDIAPIPE_TRACKER_ID,
   MEDIAPIPE_TRACKER_VERSION,
@@ -26,12 +30,32 @@ const rows = JSON.parse(execFileSync("sqlite3", [
   "-json",
   databasePath,
   "SELECT value_json FROM json_records WHERE bucket='calibrations' ORDER BY updated_at DESC;",
-], { encoding: "utf8" })) as Array<{ value_json: string }>;
+], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 })) as Array<{ value_json: string }>;
 
 const report = rows.map(({ value_json }) => {
   const calibration = calibrationSchema.parse(JSON.parse(value_json));
   const heldOut = evaluateHeldOutCalibration(calibration);
   const gate = calibrationQualityGate(heldOut.accuracy, heldOut.byTarget);
+  const model = trainClassifier({
+    ...calibration,
+    samples: heldOut.trainingSamples,
+  });
+  const predictionCounts = heldOut.validationSamples.reduce<
+    Record<string, Record<string, number>>
+  >((counts, sample) => {
+    if (
+      sample.feature.blink ||
+      !sample.feature.faceDetected ||
+      sample.feature.confidence < 0.55
+    ) {
+      return counts;
+    }
+    const predicted = classifyFrame(model, sample.feature).rawState;
+    counts[sample.target] ??= {};
+    counts[sample.target][predicted] =
+      (counts[sample.target][predicted] ?? 0) + 1;
+    return counts;
+  }, {});
   return {
     id: calibration.id,
     profileId: calibration.profileId,
@@ -57,6 +81,9 @@ const report = rows.map(({ value_json }) => {
     validationSamples: heldOut.validationSamples.length,
     accuracy: heldOut.accuracy,
     byTarget: heldOut.byTarget,
+    predictionCounts,
+    prototypes: model.prototypes,
+    contactRadius: model.contactRadius,
     gate,
   };
 });

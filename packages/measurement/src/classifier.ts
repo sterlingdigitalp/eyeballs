@@ -6,13 +6,19 @@ import type {
   GazeState,
 } from "../../contracts/src";
 
-export const ALGORITHM_VERSION = "cluster-hysteresis/1.2.1";
+export const ALGORITHM_VERSION = "gaze-compensated-cluster/1.3.0";
 
 type Point = [number, number, number, number];
+const AMBIGUOUS_STATE_SEPARATION = 0.02;
+const KNOWN_GEOMETRY_RADIUS = 0.24;
 
-const toPoint = (feature: FeatureVector): Point => [
-  feature.eyeYaw,
-  feature.eyePitch,
+const toPoint = (
+  feature: FeatureVector,
+  yawCompensation: number,
+  pitchCompensation: number,
+): Point => [
+  feature.eyeYaw + yawCompensation * feature.headYaw,
+  feature.eyePitch + pitchCompensation * feature.headPitch,
   feature.headYaw * 0.45,
   feature.headPitch * 0.45,
 ];
@@ -32,9 +38,75 @@ const robustCenter = (points: Point[]): Point =>
 
 const targetState = (target: CalibrationTarget): GazeState => {
   if (target === "lens" || target.startsWith("head_")) return "contact";
-  if (target === "near_lens") return "near_lens";
+  if (target === "near_lens" || target === "above_lens") return "near_lens";
   return "off_lens";
 };
+
+const rawCenter = (features: FeatureVector[]): Point =>
+  robustCenter(
+    features.map((feature) => [
+      feature.eyeYaw,
+      feature.eyePitch,
+      feature.headYaw,
+      feature.headPitch,
+    ]),
+  );
+
+const compensationRatio = (
+  baseEye: number,
+  targetEye: number,
+  baseHead: number,
+  targetHead: number,
+): number | undefined => {
+  const headDelta = targetHead - baseHead;
+  if (Math.abs(headDelta) < 0.05) return undefined;
+  return (baseEye - targetEye) / headDelta;
+};
+
+const clamp = (value: number, minimum: number, maximum: number): number =>
+  Math.max(minimum, Math.min(maximum, value));
+
+function learnGazeCompensation(
+  groupedFeatures: Map<CalibrationTarget, FeatureVector[]>,
+): { yaw: number; pitch: number } {
+  const lens = groupedFeatures.get("lens");
+  if (!lens?.length) return { yaw: 0, pitch: 0 };
+  const lensCenter = rawCenter(lens);
+  const yawRatios = (
+    ["head_left_eyes_lens", "head_right_eyes_lens"] as const
+  )
+    .map((target) => {
+      const features = groupedFeatures.get(target);
+      if (!features?.length) return undefined;
+      const targetCenter = rawCenter(features);
+      return compensationRatio(
+        lensCenter[0],
+        targetCenter[0],
+        lensCenter[2],
+        targetCenter[2],
+      );
+    })
+    .filter((value): value is number => value !== undefined);
+  const headDown = groupedFeatures.get("head_down_eyes_lens");
+  const pitchRatio = headDown?.length
+    ? (() => {
+        const targetCenter = rawCenter(headDown);
+        return compensationRatio(
+          lensCenter[1],
+          targetCenter[1],
+          lensCenter[3],
+          targetCenter[3],
+        );
+      })()
+    : undefined;
+  return {
+    yaw: yawRatios.length
+      ? clamp(quantile(yawRatios, 0.5), 0, 1.5)
+      : 0,
+    pitch:
+      pitchRatio === undefined ? 0 : clamp(pitchRatio, 0, 2.5),
+  };
+}
 
 export interface ClassifierModel {
   calibrationId: string;
@@ -42,25 +114,36 @@ export interface ClassifierModel {
   trackerVersion: string;
   prototypes: Array<{ state: GazeState; point: Point; radius: number }>;
   contactRadius: number;
+  yawCompensation: number;
+  pitchCompensation: number;
 }
 
 export function trainClassifier(calibration: Calibration): ClassifierModel {
-  const grouped = new Map<CalibrationTarget, Point[]>();
+  const groupedFeatures = new Map<CalibrationTarget, FeatureVector[]>();
   for (const sample of calibration.samples) {
     if (!sample.feature.faceDetected || sample.feature.blink || sample.feature.confidence < 0.65) continue;
-    grouped.set(sample.target, [...(grouped.get(sample.target) ?? []), toPoint(sample.feature)]);
+    groupedFeatures.set(sample.target, [
+      ...(groupedFeatures.get(sample.target) ?? []),
+      sample.feature,
+    ]);
   }
-  const prototypes = [...grouped.entries()].map(([target, points]) => {
-    const point = robustCenter(points);
-    return {
-      state: targetState(target),
-      point,
-      radius: Math.max(
-        0.02,
-        quantile(points.map((value) => distance(value, point)), 0.9),
-      ),
-    };
-  });
+  const compensation = learnGazeCompensation(groupedFeatures);
+  const prototypes = [...groupedFeatures.entries()]
+    .filter(([target]) => targetState(target) !== "near_lens")
+    .map(([target, features]) => {
+      const points = features.map((feature) =>
+        toPoint(feature, compensation.yaw, compensation.pitch),
+      );
+      const point = robustCenter(points);
+      return {
+        state: targetState(target),
+        point,
+        radius: Math.max(
+          0.02,
+          quantile(points.map((value) => distance(value, point)), 0.9),
+        ),
+      };
+    });
   const contactPoints = calibration.samples
     .filter(
       (sample) =>
@@ -69,7 +152,9 @@ export function trainClassifier(calibration: Calibration): ClassifierModel {
         !sample.feature.blink &&
         sample.feature.confidence >= 0.65,
     )
-    .map((sample) => toPoint(sample.feature));
+    .map((sample) =>
+      toPoint(sample.feature, compensation.yaw, compensation.pitch),
+    );
   const offPrototypes = prototypes.filter((prototype) => prototype.state === "off_lens");
   if (!contactPoints.length || !offPrototypes.length) {
     throw new Error("Calibration needs stable lens and off-lens samples.");
@@ -84,6 +169,8 @@ export function trainClassifier(calibration: Calibration): ClassifierModel {
     trackerVersion: calibration.trackerVersion,
     prototypes,
     contactRadius: Math.min(offDistance * 0.48, spread * 2.5),
+    yawCompensation: compensation.yaw,
+    pitchCompensation: compensation.pitch,
   };
 }
 
@@ -97,14 +184,30 @@ export function classifyFrame(model: ClassifierModel, feature: FeatureVector): G
     unknown: 1,
   };
   if (feature.faceDetected && feature.confidence >= 0.55 && !feature.blink) {
-    const point = toPoint(feature);
-    const ranked = model.prototypes
+    const point = toPoint(
+      feature,
+      model.yawCompensation,
+      model.pitchCompensation,
+    );
+    const prototypeCandidates = model.prototypes
       .map((prototype) => ({
         state: prototype.state,
         radius: prototype.radius,
         distance: distance(point, prototype.point),
       }))
       .sort((a, b) => a.distance - b.distance);
+    const nearestByState = new Map<
+      GazeState,
+      (typeof prototypeCandidates)[number]
+    >();
+    for (const candidate of prototypeCandidates) {
+      if (!nearestByState.has(candidate.state)) {
+        nearestByState.set(candidate.state, candidate);
+      }
+    }
+    const ranked = [...nearestByState.values()].sort(
+      (a, b) => a.distance - b.distance,
+    );
     const first = ranked[0];
     const second = ranked[1];
     if (first) {
@@ -112,20 +215,22 @@ export function classifyFrame(model: ClassifierModel, feature: FeatureVector): G
         ? Math.max(0, second.distance - first.distance) /
           Math.max(0.001, second.distance)
         : 1;
-      const knownRadius = Math.max(0.16, first.radius * 4);
+      const knownRadius = Math.max(KNOWN_GEOMETRY_RADIUS, first.radius * 4);
       const proximity = Math.max(0, 1 - first.distance / knownRadius);
       confidence = Math.min(
         feature.confidence,
         0.45 + relativeSeparation * 0.4 + proximity * 0.15,
       );
-      const ambiguous = Boolean(second && relativeSeparation < 0.08);
+      const ambiguous = Boolean(
+        second && relativeSeparation < AMBIGUOUS_STATE_SEPARATION,
+      );
       const outOfDistribution = first.distance > knownRadius;
       const knownWeights = {
         contact: 0,
         near_lens: 0,
         off_lens: 0,
       };
-      for (const candidate of ranked) {
+      for (const candidate of nearestByState.values()) {
         knownWeights[candidate.state as keyof typeof knownWeights] = Math.max(
           knownWeights[candidate.state as keyof typeof knownWeights],
           Math.exp(-candidate.distance / 0.08),

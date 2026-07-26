@@ -719,13 +719,42 @@ function CalibrationWizard({
   const [brightness, setBrightness] = useState<BrightnessAssessment>();
   const current = sequenceSteps[step];
   const currentTarget = current?.target;
+  const activeCollectionRef = useRef<{
+    phase: CalibrationPhase;
+    stepId: string;
+    target: CalibrationTarget;
+    startedAtMs: number;
+    firstTimestampUs?: number;
+    lastTimestampUs?: number;
+    sampleCount: number;
+  } | undefined>(undefined);
   const tracker = useTracker(videoRef, Boolean(stream && profile), (feature) => {
     setPreflightFeature(feature);
-    if (collecting && currentTarget) {
-      if (phase === "validation") {
-        setValidationSamples((values) => [...values, { target: currentTarget, feature }]);
+    const activeCollection = activeCollectionRef.current;
+    if (activeCollection) {
+      if (activeCollection.sampleCount === 0) {
+        activeCollection.firstTimestampUs = feature.timestampUs;
+        void logEvent("calibration_collection_first_frame", {
+          fields: {
+            phase: activeCollection.phase,
+            stepId: activeCollection.stepId,
+            target: activeCollection.target,
+            timestampUs: feature.timestampUs,
+          },
+        });
+      }
+      activeCollection.lastTimestampUs = feature.timestampUs;
+      activeCollection.sampleCount += 1;
+      if (activeCollection.phase === "validation") {
+        setValidationSamples((values) => [
+          ...values,
+          { target: activeCollection.target, feature },
+        ]);
       } else {
-        setSamples((values) => [...values, { target: currentTarget, feature }]);
+        setSamples((values) => [
+          ...values,
+          { target: activeCollection.target, feature },
+        ]);
       }
     }
   });
@@ -742,6 +771,7 @@ function CalibrationWizard({
     setPhase("training");
     setSequenceSteps(TRAINING_CALIBRATION_STEPS);
     setStep(-1);
+    activeCollectionRef.current = undefined;
   }, [stream]);
 
   const playCalibrationCue = useCallback((frequency: number) => {
@@ -789,6 +819,23 @@ function CalibrationWizard({
     if (countdown <= 0) {
       setCountdown(undefined);
       playCalibrationCue(880);
+      if (current) {
+        activeCollectionRef.current = {
+          phase,
+          stepId: current.id,
+          target: current.target,
+          startedAtMs: performance.now(),
+          sampleCount: 0,
+        };
+        void logEvent("calibration_collection_started", {
+          fields: {
+            phase,
+            stepId: current.id,
+            target: current.target,
+            collectMs: current.collectMs,
+          },
+        });
+      }
       setCollecting(true);
       return;
     }
@@ -797,11 +844,26 @@ function CalibrationWizard({
       1000,
     );
     return () => window.clearTimeout(timer);
-  }, [countdown, playCalibrationCue]);
+  }, [countdown, current, phase, playCalibrationCue]);
 
   useEffect(() => {
     if (!collecting) return;
     const timer = window.setTimeout(() => {
+      const finishedCollection = activeCollectionRef.current;
+      activeCollectionRef.current = undefined;
+      if (finishedCollection) {
+        void logEvent("calibration_collection_finished", {
+          fields: {
+            phase: finishedCollection.phase,
+            stepId: finishedCollection.stepId,
+            target: finishedCollection.target,
+            elapsedMs: performance.now() - finishedCollection.startedAtMs,
+            firstTimestampUs: finishedCollection.firstTimestampUs,
+            lastTimestampUs: finishedCollection.lastTimestampUs,
+            sampleCount: finishedCollection.sampleCount,
+          },
+        });
+      }
       playCalibrationCue(520);
       setCollecting(false);
       if (step < sequenceSteps.length - 1) {
@@ -822,22 +884,10 @@ function CalibrationWizard({
     setWeakTargets([]);
     setResult(undefined);
     setQuickResult(undefined);
+    activeCollectionRef.current = undefined;
     setCollecting(false);
     setStep(0);
     setCountdown(TRAINING_CALIBRATION_STEPS[0].settleSeconds);
-  };
-
-  const restartGuidedCalibration = () => {
-    setCollecting(false);
-    setCountdown(undefined);
-    setSamples([]);
-    setValidationSamples([]);
-    setWeakTargets([]);
-    setResult(undefined);
-    setQuickResult(undefined);
-    setPhase("training");
-    setSequenceSteps(TRAINING_CALIBRATION_STEPS);
-    setStep(-1);
   };
 
   const beginValidation = () => {
@@ -845,6 +895,7 @@ function CalibrationWizard({
     setPhase("validation");
     setSequenceSteps(steps);
     setValidationSamples([]);
+    activeCollectionRef.current = undefined;
     setCollecting(false);
     setStep(0);
     setCountdown(steps[0].settleSeconds);
@@ -856,6 +907,7 @@ function CalibrationWizard({
     setSamples([]);
     setValidationSamples([]);
     setQuickResult(undefined);
+    activeCollectionRef.current = undefined;
     setCollecting(false);
     setStep(0);
     setCountdown(QUICK_LENS_VERIFICATION_STEPS[0].settleSeconds);
@@ -1011,6 +1063,7 @@ function CalibrationWizard({
     setQuickResult(undefined);
     setPhase("training");
     setSequenceSteps(steps);
+    activeCollectionRef.current = undefined;
     setCollecting(false);
     setStep(0);
     setCountdown(steps[0].settleSeconds);
@@ -1031,45 +1084,34 @@ function CalibrationWizard({
     return <section className="empty-state"><h1>Finish camera setup first.</h1><p>Select a profile and enable its camera.</p></section>;
   }
   return (
-    <section className="screen calibration-screen">
-      <div className="screen-copy">
-        <p className="eyebrow">Calibration · {profile.name}</p>
-        <h1>{step < 0 ? "Teach the coach your natural lens contact." : current?.title ?? "Validation"}</h1>
-        <p className="lede">
-          {step < 0
-            ? existingCalibration
-              ? "A compatible saved calibration is active. Verify it quickly or collect a full replacement."
-              : invalidationReason
-                ? `The saved calibration cannot be reused: ${invalidationReason} Complete a full replacement.`
-              : "Keep your position steady. We’ll collect lens, glance, and head/eye separation samples."
-            : current
-              ? `${current.faceInstruction} ${current.eyeInstruction}`
+    <section
+      className={`screen calibration-screen ${current ? "active-calibration" : ""}`}
+    >
+      {!current && (
+        <div className="screen-copy">
+          <p className="eyebrow">Calibration · {profile.name}</p>
+          <h1>
+            {step < 0
+              ? "Teach the coach your natural lens contact."
+              : "Validation"}
+          </h1>
+          <p className="lede">
+            {step < 0
+              ? existingCalibration
+                ? "A compatible saved calibration is active. Verify it quickly or collect a full replacement."
+                : invalidationReason
+                  ? `The saved calibration cannot be reused: ${invalidationReason} Complete a full replacement.`
+                  : "Keep your position steady. We’ll collect lens, glance, and head/eye separation samples."
               : "Calibration samples are ready for quality checks."}
-        </p>
-        {current?.spokenPrompt && (
-          <p className="spoken-calibration-prompt">“{current.spokenPrompt}”</p>
-        )}
-        {step >= 0 && step < sequenceSteps.length && (
-          <div
-            className={`guided-status guidance-above-preview ${collecting ? "collecting" : ""}`}
-            aria-live="assertive"
-          >
-            <strong>
-              {collecting
-                ? "Hold steady — collecting now"
-                : `Position yourself — capture starts in ${countdown ?? 0}`}
-            </strong>
-            <span>
-              {phase === "validation" ? "Independent validation" : "Calibration"}{" "}
-              step {step + 1} of {sequenceSteps.length}.{" "}
-              {current?.physicalLens
-                ? "Look away from this window and hold the physical glass lens until the end chime."
-                : "Follow the target inside the preview."}
-            </span>
-          </div>
-        )}
-        <div className="calibration-controls guidance-above-preview">
-          <div className="progress"><span style={{ width: `${Math.max(0, (step + 1) / sequenceSteps.length) * 100}%` }} /></div>
+          </p>
+          <div className="calibration-controls guidance-above-preview">
+            <div className="progress">
+              <span
+                style={{
+                  width: `${Math.max(0, (step + 1) / sequenceSteps.length) * 100}%`,
+                }}
+              />
+            </div>
           {step < 0 && (
             <button disabled={!preflightReady} onClick={beginGuidedCalibration}>
               Begin guided calibration
@@ -1083,9 +1125,6 @@ function CalibrationWizard({
             >
               Quick lens verification
             </button>
-          )}
-          {step >= 0 && step < sequenceSteps.length && (
-            <button className="secondary" onClick={restartGuidedCalibration}>Restart</button>
           )}
           {step === sequenceSteps.length && phase === "training" && (
             <button onClick={beginValidation}>Begin independent validation</button>
@@ -1125,17 +1164,22 @@ function CalibrationWizard({
               <span>{Math.round(quickResult * 100)}% of usable lens samples matched.</span>
             </div>
           )}
+          </div>
         </div>
-      </div>
+      )}
       <VideoPreview
         stream={stream}
         videoRef={videoRef}
         lensAnchor={profile.lensAnchor}
-        showLensAnchor={!current?.physicalLens}
-        calibrationGuide={currentTarget && current && !current.physicalLens ? {
-          ...calibrationGuidePoint(currentTarget, profile.lensAnchor),
-          label: current.markerLabel,
-        } : undefined}
+        showLensAnchor={!current}
+        calibrationGuide={
+          currentTarget && current && !(current.physicalLens && collecting)
+            ? {
+                ...calibrationGuidePoint(currentTarget, profile.lensAnchor),
+                label: current.shortInstruction,
+              }
+            : undefined
+        }
       />
       {step < 0 && (
         <div className="preflight-grid" aria-label="Calibration preflight">

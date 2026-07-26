@@ -33,6 +33,67 @@ describe("personalized classifier", () => {
     );
   });
 
+  it("does not treat two nearby prototypes for the same state as ambiguous", () => {
+    const closeOffTargets = calibration();
+    closeOffTargets.samples = closeOffTargets.samples.map((sample, index) => {
+      if (sample.target === "left") {
+        return {
+          ...sample,
+          feature: feature({ eyeYaw: 0.3 + index / 100_000 }),
+        };
+      }
+      if (sample.target === "right") {
+        return {
+          ...sample,
+          feature: feature({ eyeYaw: 0.305 + index / 100_000 }),
+        };
+      }
+      return sample;
+    });
+    const closeOffModel = trainClassifier(closeOffTargets);
+
+    expect(
+      classifyFrame(closeOffModel, feature({ eyeYaw: 0.3025 })).rawState,
+    ).toBe("off_lens");
+  });
+
+  it("learns head compensation from eyes-on-lens separation targets", () => {
+    const compensated = calibration();
+    for (let index = 0; index < 20; index += 1) {
+      compensated.samples.push(
+        {
+          target: "head_left_eyes_lens",
+          feature: feature({ eyeYaw: -0.3, headYaw: 0.5 }),
+        },
+        {
+          target: "head_right_eyes_lens",
+          feature: feature({ eyeYaw: 0.3, headYaw: -0.5 }),
+        },
+        {
+          target: "head_down_eyes_lens",
+          feature: feature({ eyePitch: -0.3, headPitch: 0.25 }),
+        },
+        {
+          target: "near_lens",
+          feature: feature({ eyePitch: 0.04 }),
+        },
+        {
+          target: "above_lens",
+          feature: feature({ eyePitch: -0.04 }),
+        },
+      );
+    }
+
+    const compensatedModel = trainClassifier(compensated);
+    expect(compensatedModel.yawCompensation).toBeCloseTo(0.6);
+    expect(compensatedModel.pitchCompensation).toBeCloseTo(1.2);
+    expect(
+      compensatedModel.prototypes.some(
+        (prototype) => prototype.state === "near_lens",
+      ),
+    ).toBe(false);
+  });
+
   it("excludes blinked and low-confidence samples from contact-radius training", () => {
     const clean = calibration();
     const contaminated = {

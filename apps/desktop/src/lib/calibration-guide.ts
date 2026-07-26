@@ -2,6 +2,8 @@ import type { CalibrationTarget } from "../../../../packages/contracts/src";
 
 export interface CalibrationGuide {
   title: string;
+  /** The only visible instruction inside the preview before/during capture. */
+  shortInstruction: string;
   faceInstruction: string;
   eyeInstruction: string;
   markerLabel: string;
@@ -13,6 +15,7 @@ export interface CalibrationGuide {
 export const CALIBRATION_GUIDES: Record<CalibrationTarget, CalibrationGuide> = {
   lens: {
     title: "Lens baseline",
+    shortInstruction: "LOOK AT CAMERA LENS ↑",
     faceInstruction: "Face: straight ahead in your normal speaking posture.",
     eyeInstruction: "Eyes: look directly into the physical glass camera lens—not at this window. Keep looking there until the end chime.",
     markerLabel: "PHYSICAL LENS",
@@ -22,6 +25,7 @@ export const CALIBRATION_GUIDES: Record<CalibrationTarget, CalibrationGuide> = {
   },
   near_lens: {
     title: "Near lens",
+    shortInstruction: "BELOW CAMERA",
     faceInstruction: "Face: keep straight ahead and still.",
     eyeInstruction: "Eyes: look at the target just beneath the lens.",
     markerLabel: "NEAR LENS",
@@ -31,6 +35,7 @@ export const CALIBRATION_GUIDES: Record<CalibrationTarget, CalibrationGuide> = {
   },
   left: {
     title: "Left target",
+    shortInstruction: "LOOK LEFT",
     faceInstruction: "Face: keep straight ahead; do not follow the target.",
     eyeInstruction: "Eyes: look at the target on the left side of the preview.",
     markerLabel: "LOOK LEFT",
@@ -40,6 +45,7 @@ export const CALIBRATION_GUIDES: Record<CalibrationTarget, CalibrationGuide> = {
   },
   right: {
     title: "Right target",
+    shortInstruction: "LOOK RIGHT",
     faceInstruction: "Face: keep straight ahead; do not follow the target.",
     eyeInstruction: "Eyes: look at the target on the right side of the preview.",
     markerLabel: "LOOK RIGHT",
@@ -49,6 +55,7 @@ export const CALIBRATION_GUIDES: Record<CalibrationTarget, CalibrationGuide> = {
   },
   down: {
     title: "Notes target",
+    shortInstruction: "NOTES",
     faceInstruction: "Face: allow only a small, natural downward tilt.",
     eyeInstruction: "Eyes: look at the lower target as if consulting notes.",
     markerLabel: "NOTES",
@@ -58,6 +65,7 @@ export const CALIBRATION_GUIDES: Record<CalibrationTarget, CalibrationGuide> = {
   },
   above_lens: {
     title: "Above lens",
+    shortInstruction: "LOOK ABOVE CAMERA LENS ↑",
     faceInstruction: "Face: keep straight ahead and still.",
     eyeInstruction: "Eyes: look just above the physical glass camera lens until the end chime.",
     markerLabel: "ABOVE LENS",
@@ -67,6 +75,7 @@ export const CALIBRATION_GUIDES: Record<CalibrationTarget, CalibrationGuide> = {
   },
   screen_center: {
     title: "Screen target",
+    shortInstruction: "SCREEN CENTER",
     faceInstruction: "Face: return to straight ahead.",
     eyeInstruction: "Eyes: look at the target in the middle of the preview.",
     markerLabel: "SCREEN",
@@ -76,6 +85,7 @@ export const CALIBRATION_GUIDES: Record<CalibrationTarget, CalibrationGuide> = {
   },
   self_preview: {
     title: "Self-preview target",
+    shortInstruction: "LOOK AT YOUR EYES",
     faceInstruction: "Face: keep straight ahead.",
     eyeInstruction: "Eyes: look at the self-preview target inside the camera image.",
     markerLabel: "SELF PREVIEW",
@@ -85,6 +95,7 @@ export const CALIBRATION_GUIDES: Record<CalibrationTarget, CalibrationGuide> = {
   },
   head_left_eyes_lens: {
     title: "Head left, eyes on lens",
+    shortInstruction: "HEAD LEFT · EYES LENS ↑",
     faceInstruction: "Face: turn slightly left.",
     eyeInstruction: "Eyes: stay fixed on the physical glass camera lens—not at this window.",
     markerLabel: "PHYSICAL LENS",
@@ -94,6 +105,7 @@ export const CALIBRATION_GUIDES: Record<CalibrationTarget, CalibrationGuide> = {
   },
   head_right_eyes_lens: {
     title: "Head right, eyes on lens",
+    shortInstruction: "HEAD RIGHT · EYES LENS ↑",
     faceInstruction: "Face: turn slightly right.",
     eyeInstruction: "Eyes: stay fixed on the physical glass camera lens—not at this window.",
     markerLabel: "PHYSICAL LENS",
@@ -103,6 +115,7 @@ export const CALIBRATION_GUIDES: Record<CalibrationTarget, CalibrationGuide> = {
   },
   head_down_eyes_lens: {
     title: "Head down, eyes on lens",
+    shortInstruction: "HEAD DOWN · EYES LENS ↑",
     faceInstruction: "Face: tilt slightly down.",
     eyeInstruction: "Eyes: stay fixed on the physical glass camera lens—not at this window.",
     markerLabel: "PHYSICAL LENS",
