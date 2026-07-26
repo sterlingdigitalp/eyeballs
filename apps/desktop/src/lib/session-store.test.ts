@@ -96,11 +96,19 @@ describe("session checkpoint merge", () => {
       evidence: ["break_ms=1200"],
     }];
     browser.speakingWindows = [{ startUs: 2_000, endUs: 3_000 }];
+    browser.bookmarks = [{
+      id: "bookmark-1",
+      sessionId: "1",
+      timestampUs: 500,
+      note: "Review this recovery",
+      createdAt: "2026-07-26T12:00:00.000Z",
+    }];
     const [merged] = mergeStoredSessions([browser], [native]);
     expect(merged.manifest.status).toBe("incomplete");
     expect(merged.features).toHaveLength(50);
     expect(merged.cues).toEqual(browser.cues);
     expect(merged.speakingWindows).toEqual(browser.speakingWindows);
+    expect(merged.bookmarks).toEqual(browser.bookmarks);
   });
 
   it("keeps the richer native coaching evidence when browser evidence is stale", () => {

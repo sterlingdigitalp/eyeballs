@@ -6,6 +6,7 @@ import {
   featureVectorSchema,
   gazeEventSchema,
   gazePredictionSchema,
+  reviewBookmarkSchema,
   sessionManifestSchema,
   speakingWindowSchema,
 } from "../../../../packages/contracts/src";
@@ -18,6 +19,7 @@ const storedSessionSchema = z.object({
   predictions: z.array(gazePredictionSchema),
   events: z.array(gazeEventSchema),
   corrections: z.array(correctionSchema),
+  bookmarks: z.array(reviewBookmarkSchema).optional(),
   cues: z.array(cueEventSchema).optional(),
   speakingWindows: z.array(speakingWindowSchema).optional(),
   media: z.instanceof(Blob).optional(),
@@ -121,6 +123,7 @@ export function mergeStoredSessions(
       predictions: longer(browser.predictions, native.predictions),
       events: longer(browser.events, native.events),
       corrections: longer(browser.corrections, native.corrections),
+      bookmarks: optionalLonger(browser.bookmarks, native.bookmarks),
       cues: optionalLonger(browser.cues, native.cues),
       speakingWindows: optionalLonger(
         browser.speakingWindows,

@@ -17,6 +17,7 @@ import type {
   GazePrediction,
   GazeState,
   RecordingAsset,
+  ReviewBookmark,
   SessionManifest,
 } from "../../../packages/contracts/src";
 import { gazePredictionSchema } from "../../../packages/contracts/src";
@@ -64,16 +65,22 @@ import {
   finishReflection,
   getDrillById,
   HANDS_FREE_SETTLE_SECONDS,
+  keyboardSeekSeconds,
   loadBuiltinDrills,
   noteWindowsFromDrill,
   rateSessionCue,
   requestStop,
+  REVIEW_TIMELINE_ZOOM_LEVELS,
   restartSafeRecordingFlag,
   seekSecondsFromTimelineUs,
+  segmentPercentInViewport,
   shouldAutoCompleteHandsFreeDrill,
   speakingSeconds,
   tickActive,
   tickCountdown,
+  timelineViewport,
+  timestampPercentInViewport,
+  type ReviewTimelineZoom,
   type TrainSessionState,
 } from "../../../packages/coaching/src";
 import {
@@ -2296,6 +2303,10 @@ function Review({
   const [correctionError, setCorrectionError] = useState<string>();
   const [playbackTime, setPlaybackTime] = useState(0);
   const [playbackDuration, setPlaybackDuration] = useState(0);
+  const [timelineZoom, setTimelineZoom] =
+    useState<ReviewTimelineZoom>(1);
+  const [bookmarkNote, setBookmarkNote] = useState("");
+  const [bookmarkError, setBookmarkError] = useState<string>();
   const playbackRef = useRef<HTMLVideoElement>(null);
   const selected = sessions.find((session) => session.manifest.id === selectedId) ?? sessions[0];
   const reviewOriginUs =
@@ -2351,6 +2362,15 @@ function Review({
       : [],
     [reviewOriginUs, selected, timelineDurationUs],
   );
+  const reviewViewport = useMemo(
+    () =>
+      timelineViewport(
+        timelineDurationUs || 1,
+        timelineZoom,
+        Math.round(playbackTime * 1_000_000),
+      ),
+    [playbackTime, timelineDurationUs, timelineZoom],
+  );
   const reviewDrillId = selected?.manifest.coaching?.drillId;
   const reviewDrill = useMemo(
     () =>
@@ -2369,6 +2389,7 @@ function Review({
             cues: selected.cues,
             drill: reviewDrill,
             speakingWindows: selected.speakingWindows,
+            bookmarks: selected.bookmarks,
           })
         : [],
     [reviewDrill, reviewOriginUs, selected, timelineDurationUs],
@@ -2378,6 +2399,9 @@ function Review({
   useEffect(() => {
     setPlaybackTime(0);
     setPlaybackDuration(0);
+    setTimelineZoom(1);
+    setBookmarkNote("");
+    setBookmarkError(undefined);
   }, [selected?.manifest.id]);
 
   const addCorrection = async () => {
@@ -2527,6 +2551,7 @@ function Review({
       corrections: selected.corrections,
       cues: selected.cues ?? [],
       speakingWindows: selected.speakingWindows ?? [],
+      bookmarks: selected.bookmarks ?? [],
     });
   };
 
@@ -2539,6 +2564,7 @@ function Review({
       cues: selected.cues,
       drill: reviewDrill,
       speakingWindows: selected.speakingWindows,
+      bookmarks: selected.bookmarks,
       originUs: reviewOriginUs,
       durationUs: timelineDurationUs || 1,
     });
@@ -2558,6 +2584,75 @@ function Review({
   const seekToTimelineUs = (timestampUs: number) => {
     if (!playbackRef.current) return;
     playbackRef.current.currentTime = seekSecondsFromTimelineUs(timestampUs);
+  };
+
+  const handleTimelineKeyDown = (
+    event: React.KeyboardEvent<HTMLElement>,
+  ) => {
+    const target = keyboardSeekSeconds({
+      key: event.key,
+      currentSeconds: playbackRef.current?.currentTime ?? playbackTime,
+      durationSeconds:
+        playbackRef.current?.duration ||
+        playbackDuration ||
+        timelineDurationUs / 1_000_000,
+      shiftKey: event.shiftKey,
+    });
+    if (target === undefined || !playbackRef.current) return;
+    event.preventDefault();
+    playbackRef.current.currentTime = target;
+    setPlaybackTime(target);
+  };
+
+  const addBookmark = async () => {
+    if (!selected || !bookmarkNote.trim()) return;
+    const bookmark: ReviewBookmark = {
+      id: crypto.randomUUID(),
+      sessionId: selected.manifest.id,
+      timestampUs: Math.min(
+        timelineDurationUs,
+        Math.max(0, Math.round(playbackTime * 1_000_000)),
+      ),
+      note: bookmarkNote.trim(),
+      createdAt: new Date().toISOString(),
+    };
+    const updated = {
+      ...selected,
+      bookmarks: [...(selected.bookmarks ?? []), bookmark],
+    };
+    try {
+      await store.sessions.put(updated);
+      onUpdated(updated);
+      setBookmarkNote("");
+      setBookmarkError(undefined);
+    } catch (cause) {
+      setBookmarkError(
+        `Bookmark could not be saved: ${
+          cause instanceof Error ? cause.message : String(cause)
+        }`,
+      );
+    }
+  };
+
+  const removeBookmark = async (bookmarkId: string) => {
+    if (!selected) return;
+    const updated = {
+      ...selected,
+      bookmarks: (selected.bookmarks ?? []).filter(
+        (bookmark) => bookmark.id !== bookmarkId,
+      ),
+    };
+    try {
+      await store.sessions.put(updated);
+      onUpdated(updated);
+      setBookmarkError(undefined);
+    } catch (cause) {
+      setBookmarkError(
+        `Bookmark could not be deleted: ${
+          cause instanceof Error ? cause.message : String(cause)
+        }`,
+      );
+    }
   };
 
   return (
@@ -2612,15 +2707,41 @@ function Review({
                   : ""}
               </p>
             )}
-            <div className="review-lanes" aria-label="Multi-lane coaching timeline">
+            <div className="timeline-toolbar">
+              <span className="muted">
+                Evidence timeline {(reviewViewport.startUs / 1_000_000).toFixed(1)}–
+                {(reviewViewport.endUs / 1_000_000).toFixed(1)}s
+              </span>
+              <div className="button-row" aria-label="Timeline zoom">
+                {REVIEW_TIMELINE_ZOOM_LEVELS.map((zoom) => (
+                  <button
+                    key={zoom}
+                    type="button"
+                    className={timelineZoom === zoom ? "active" : "secondary"}
+                    onClick={() => setTimelineZoom(zoom)}
+                  >
+                    {zoom}×
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div
+              className="review-lanes"
+              aria-label="Multi-lane coaching timeline"
+              tabIndex={0}
+              onKeyDown={handleTimelineKeyDown}
+              title="Arrow keys seek 1 second; Shift+Arrow seeks 5 seconds; Home/End jump to session bounds."
+            >
               {multiLanes.map((lane) => (
                 <div className="review-lane" key={lane.id}>
                   <span>{lane.name}</span>
                   <div className="review-lane-track">
                     {lane.segments.map((segment, index) => {
-                      const widthPct =
-                        ((segment.endUs - segment.startUs) / Math.max(timelineDurationUs, 1)) * 100;
-                      const leftPct = (segment.startUs / Math.max(timelineDurationUs, 1)) * 100;
+                      const placement = segmentPercentInViewport(
+                        segment,
+                        reviewViewport,
+                      );
+                      if (!placement) return null;
                       return (
                         <button
                           type="button"
@@ -2628,8 +2749,8 @@ function Review({
                           className="review-lane-seg"
                           title={segment.label}
                           style={{
-                            left: `${leftPct}%`,
-                            width: `${Math.max(widthPct, 0.2)}%`,
+                            left: `${placement.leftPct}%`,
+                            width: `${Math.max(placement.widthPct, 0.2)}%`,
                             background:
                               lane.id === "contact"
                                 ? contactColor(segment.label)
@@ -2641,22 +2762,79 @@ function Review({
                         />
                       );
                     })}
-                    {lane.markers.map((marker) => (
-                      <button
-                        type="button"
-                        key={`${lane.id}-m-${marker.id ?? marker.timestampUs}`}
-                        className="review-lane-marker"
-                        title={`${marker.label} @ ${(marker.timestampUs / 1_000_000).toFixed(2)}s`}
-                        style={{
-                          left: `${(marker.timestampUs / Math.max(timelineDurationUs, 1)) * 100}%`,
-                          background: marker.kind === "cue" ? "#e8c86b" : undefined,
-                        }}
-                        onClick={() => seekToTimelineUs(marker.timestampUs)}
-                      />
-                    ))}
+                    {lane.markers.map((marker) => {
+                      const leftPct = timestampPercentInViewport(
+                        marker.timestampUs,
+                        reviewViewport,
+                      );
+                      if (leftPct === undefined) return null;
+                      return (
+                        <button
+                          type="button"
+                          key={`${lane.id}-m-${marker.id ?? marker.timestampUs}`}
+                          className="review-lane-marker"
+                          title={`${marker.label} @ ${(marker.timestampUs / 1_000_000).toFixed(2)}s`}
+                          style={{
+                            left: `${leftPct}%`,
+                            background:
+                              marker.kind === "cue"
+                                ? "#e8c86b"
+                                : marker.kind === "bookmark"
+                                  ? "#9c8cff"
+                                  : undefined,
+                          }}
+                          onClick={() => seekToTimelineUs(marker.timestampUs)}
+                        />
+                      );
+                    })}
                   </div>
                 </div>
               ))}
+            </div>
+            <div className="panel bookmark-panel">
+              <h2>Bookmarks and annotations</h2>
+              <div className="correction-form">
+                <label>
+                  Note at {playbackTime.toFixed(1)}s
+                  <input
+                    value={bookmarkNote}
+                    maxLength={1000}
+                    placeholder="What should you revisit here?"
+                    onChange={(event) => setBookmarkNote(event.target.value)}
+                  />
+                </label>
+                <button
+                  type="button"
+                  disabled={!bookmarkNote.trim()}
+                  onClick={() => void addBookmark()}
+                >
+                  Add bookmark
+                </button>
+              </div>
+              {(selected.bookmarks ?? []).map((bookmark) => (
+                <div className="cue-rating-row" key={bookmark.id}>
+                  <button
+                    type="button"
+                    className="text-button"
+                    onClick={() => seekToTimelineUs(bookmark.timestampUs)}
+                  >
+                    {(bookmark.timestampUs / 1_000_000).toFixed(1)}s · {bookmark.note}
+                  </button>
+                  <button
+                    type="button"
+                    className="secondary"
+                    onClick={() => void removeBookmark(bookmark.id)}
+                  >
+                    Delete
+                  </button>
+                </div>
+              ))}
+              {(selected.bookmarks?.length ?? 0) === 0 && (
+                <p className="muted">No bookmarks yet.</p>
+              )}
+              {bookmarkError && (
+                <p className="tracking-warning">{bookmarkError}</p>
+              )}
             </div>
             {(selected.cues?.length ?? 0) > 0 && (
               <div className="panel cue-rating-panel">
@@ -2693,6 +2871,7 @@ function Review({
             <button
               className={`timeline ${blind ? "blind" : ""}`}
               aria-label="Prediction timeline; click to seek playback"
+              onKeyDown={handleTimelineKeyDown}
               onClick={(event) => {
                 if (!playbackRef.current?.duration) return;
                 const bounds = event.currentTarget.getBoundingClientRect();

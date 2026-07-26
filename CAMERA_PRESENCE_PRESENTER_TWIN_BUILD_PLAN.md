@@ -1967,6 +1967,8 @@ Implemented and covered by device-free tests:
 - VAD speaking-window persistence through checkpoints, browser/native
   checkpoint merging, review lanes, analysis exports, progress calculations,
   and Markdown/JSON session reports;
+- synchronized Review evidence lanes with 1×/2×/4×/8× zoom, keyboard seeking,
+  and durable timestamped bookmark annotations;
 - hands-free drill guidance: spoken instruction, four-second settle interval,
   distinct start tone, automatic timed-drill completion, and completion chime;
 - display/profile prompt binding using Tauri monitor geometry, with a warning
@@ -1983,7 +1985,7 @@ Still open for later Phase 2 slices:
 
 - custom-drill editing/deletion and richer per-beat timing controls;
 - local ASR and editable sentence alignment;
-- review zoom, keyboard navigation, bookmarks, and richer annotations;
+- editable transcript/sentence boundaries and explicit clip in/out controls;
 - rolling progress visualization;
 - real transparent always-on-top Tauri live-assist window and global shortcut.
 
@@ -2073,13 +2075,13 @@ The live coaching loop must not wait for transcription. Sentence-boundary metric
 Tasks:
 
 - [x] Build synchronized multi-lane timeline.
-- [ ] Add zoom and keyboard navigation.
+- [x] Add zoom and keyboard navigation.
 - [x] Click event to seek playback.
 - [x] Show contact, near-lens, away, and unknown separately.
 - [x] Show cue markers.
 - [ ] Show transcript and sentence boundaries.
 - [x] Show allowed-note intervals.
-- [ ] Add user annotations and bookmarks.
+- [x] Add user annotations and bookmarks.
 - [ ] Add clip in/out points, but do not yet promote automatically to a dataset.
 - [x] Export a session report as Markdown/JSON.
 

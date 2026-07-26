@@ -498,6 +498,16 @@ export const correctionSchema = z.object({
 });
 export type Correction = z.infer<typeof correctionSchema>;
 
+export const reviewBookmarkSchema = z.object({
+  id: z.string().min(1),
+  sessionId: z.string().min(1),
+  /** Session-relative media timeline position. */
+  timestampUs: z.number().int().nonnegative(),
+  note: z.string().min(1).max(1000),
+  createdAt: z.string().datetime(),
+});
+export type ReviewBookmark = z.infer<typeof reviewBookmarkSchema>;
+
 export interface DeviceInventory {
   cameras: MediaDeviceInfo[];
   microphones: MediaDeviceInfo[];

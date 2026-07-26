@@ -11,6 +11,7 @@ import type {
   GazeEvent,
   GazePrediction,
   RecommendationFeedback,
+  ReviewBookmark,
   SessionManifest,
   FeatureVector,
   SpeakingWindowRecord,
@@ -38,6 +39,7 @@ export interface StoredSession {
   predictions: GazePrediction[];
   events: GazeEvent[];
   corrections: Correction[];
+  bookmarks?: ReviewBookmark[];
   cues?: CueEvent[];
   speakingWindows?: SpeakingWindowRecord[];
   media?: Blob;

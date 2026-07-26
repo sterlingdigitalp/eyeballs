@@ -4,6 +4,7 @@ import type {
   GazeEvent,
   GazePrediction,
   GazeState,
+  ReviewBookmark,
   SessionManifest,
 } from "../../contracts/src";
 import type { SentenceBoundary, SpeakingWindow } from "./speaking";
@@ -45,6 +46,7 @@ export interface ReviewTimelineInput {
   drill?: DrillDefinition;
   speakingWindows?: SpeakingWindow[];
   sentences?: SentenceBoundary[];
+  bookmarks?: ReviewBookmark[];
   /** Countdown / app pause intervals to exclude from metrics. */
   exclusions?: MetricExclusionWindow[];
 }
@@ -150,6 +152,17 @@ export function sentenceMarkers(
   ]);
 }
 
+export function bookmarkMarkers(
+  bookmarks: ReviewBookmark[] | undefined,
+): TimelineMarker[] {
+  return (bookmarks ?? []).map((bookmark) => ({
+    timestampUs: bookmark.timestampUs,
+    label: bookmark.note,
+    kind: "bookmark",
+    id: bookmark.id,
+  }));
+}
+
 /** Multi-lane review timeline used by the Review UI. */
 export function buildReviewLanes(input: ReviewTimelineInput): ReviewLane[] {
   const durationUs = clampDuration(input.durationUs);
@@ -194,7 +207,93 @@ export function buildReviewLanes(input: ReviewTimelineInput): ReviewLane[] {
       segments: [],
       markers: sentenceMarkers(sentences),
     },
+    {
+      id: "bookmarks",
+      name: "Bookmarks",
+      segments: [],
+      markers: bookmarkMarkers(input.bookmarks),
+    },
   ];
+}
+
+export const REVIEW_TIMELINE_ZOOM_LEVELS = [1, 2, 4, 8] as const;
+export type ReviewTimelineZoom =
+  (typeof REVIEW_TIMELINE_ZOOM_LEVELS)[number];
+
+export interface TimelineViewport {
+  startUs: number;
+  endUs: number;
+  durationUs: number;
+}
+
+/** Center a zoomed viewport on playback while clamping to session bounds. */
+export function timelineViewport(
+  totalDurationUs: number,
+  zoom: ReviewTimelineZoom,
+  focusUs: number,
+): TimelineViewport {
+  const total = clampDuration(totalDurationUs);
+  const durationUs = Math.max(1, total / zoom);
+  const maxStart = Math.max(0, total - durationUs);
+  const startUs = Math.min(
+    maxStart,
+    Math.max(0, focusUs - durationUs / 2),
+  );
+  return {
+    startUs,
+    endUs: startUs + durationUs,
+    durationUs,
+  };
+}
+
+export function timestampPercentInViewport(
+  timestampUs: number,
+  viewport: TimelineViewport,
+): number | undefined {
+  if (timestampUs < viewport.startUs || timestampUs > viewport.endUs) {
+    return undefined;
+  }
+  return ((timestampUs - viewport.startUs) / viewport.durationUs) * 100;
+}
+
+export function segmentPercentInViewport(
+  segment: Pick<TimelineSegment, "startUs" | "endUs">,
+  viewport: TimelineViewport,
+): { leftPct: number; widthPct: number } | undefined {
+  const startUs = Math.max(segment.startUs, viewport.startUs);
+  const endUs = Math.min(segment.endUs, viewport.endUs);
+  if (endUs <= startUs) return undefined;
+  return {
+    leftPct: ((startUs - viewport.startUs) / viewport.durationUs) * 100,
+    widthPct: ((endUs - startUs) / viewport.durationUs) * 100,
+  };
+}
+
+export function keyboardSeekSeconds(args: {
+  key: string;
+  currentSeconds: number;
+  durationSeconds: number;
+  shiftKey?: boolean;
+}): number | undefined {
+  const step = args.shiftKey ? 5 : 1;
+  let target: number;
+  switch (args.key) {
+    case "ArrowLeft":
+      target = args.currentSeconds - step;
+      break;
+    case "ArrowRight":
+      target = args.currentSeconds + step;
+      break;
+    case "Home":
+      target = 0;
+      break;
+    case "End":
+      target = args.durationSeconds;
+      break;
+    default:
+      return undefined;
+  }
+  return Math.min(args.durationSeconds, Math.max(0, target));
 }
 
 /** Seek helper: convert a timeline marker/segment time to media seconds. */
@@ -243,6 +342,7 @@ export interface SessionReport {
     breakCount: number;
     recoveryCount: number;
     speakingSeconds: number;
+    bookmarkCount: number;
     contactRatio?: number;
     drillId?: string;
     feedbackIntensity?: string;
@@ -261,6 +361,7 @@ export function buildSessionReport(args: {
   durationUs: number;
   speakingWindows?: SpeakingWindow[];
   sentences?: SentenceBoundary[];
+  bookmarks?: ReviewBookmark[];
   exclusions?: MetricExclusionWindow[];
 }): SessionReport {
   const lanes = buildReviewLanes({
@@ -272,6 +373,7 @@ export function buildSessionReport(args: {
     drill: args.drill,
     speakingWindows: args.speakingWindows,
     sentences: args.sentences,
+    bookmarks: args.bookmarks,
     exclusions: args.exclusions,
   });
   const scored = predictionsForCoachingMetrics(args.predictions, {
@@ -284,6 +386,7 @@ export function buildSessionReport(args: {
   const recoveryCount = args.events.filter((event) => event.type === "recovery").length;
   const cueCount = args.cues?.length ?? 0;
   const spokenSeconds = speakingSeconds(args.speakingWindows ?? []);
+  const bookmarkCount = args.bookmarks?.length ?? 0;
   const markdown = [
     `# Session report`,
     ``,
@@ -298,6 +401,7 @@ export function buildSessionReport(args: {
     `- Recoveries: ${recoveryCount}`,
     `- Cues: ${cueCount}`,
     `- Speaking: ${spokenSeconds.toFixed(1)}s`,
+    `- Bookmarks: ${bookmarkCount}`,
     ``,
     `## Lanes`,
     ...lanes.map(
@@ -316,6 +420,7 @@ export function buildSessionReport(args: {
       breakCount,
       recoveryCount,
       speakingSeconds: spokenSeconds,
+      bookmarkCount,
       contactRatio,
       drillId: args.manifest.coaching?.drillId,
       feedbackIntensity: args.manifest.coaching?.feedbackIntensity,

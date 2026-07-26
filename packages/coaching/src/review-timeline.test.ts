@@ -4,9 +4,13 @@ import { parseDrillDefinition } from "./drills";
 import {
   buildReviewLanes,
   buildSessionReport,
+  keyboardSeekSeconds,
   isExcludedFromMetrics,
   predictionsForCoachingMetrics,
+  segmentPercentInViewport,
   seekSecondsFromTimelineUs,
+  timelineViewport,
+  timestampPercentInViewport,
 } from "./review-timeline";
 import level4 from "../content/drills/level4-presentation-rehearsal.json";
 
@@ -90,6 +94,7 @@ describe("review timeline", () => {
       "notes",
       "speaking",
       "transcript",
+      "bookmarks",
     ]);
     const contact = lanes.find((lane) => lane.id === "contact")!;
     expect(contact.segments.some((segment) => segment.label === "contact")).toBe(true);
@@ -121,6 +126,55 @@ describe("review timeline", () => {
     expect(seekSecondsFromTimelineUs(-10)).toBe(0);
   });
 
+  it("zooms around playback and maps only visible evidence", () => {
+    const viewport = timelineViewport(8_000_000, 4, 4_000_000);
+    expect(viewport).toEqual({
+      startUs: 3_000_000,
+      endUs: 5_000_000,
+      durationUs: 2_000_000,
+    });
+    expect(timestampPercentInViewport(4_000_000, viewport)).toBe(50);
+    expect(timestampPercentInViewport(2_000_000, viewport)).toBeUndefined();
+    expect(
+      segmentPercentInViewport(
+        { startUs: 2_500_000, endUs: 3_500_000 },
+        viewport,
+      ),
+    ).toEqual({ leftPct: 0, widthPct: 25 });
+  });
+
+  it("supports bounded one-second and shift-five-second keyboard seeking", () => {
+    expect(
+      keyboardSeekSeconds({
+        key: "ArrowRight",
+        currentSeconds: 2,
+        durationSeconds: 10,
+      }),
+    ).toBe(3);
+    expect(
+      keyboardSeekSeconds({
+        key: "ArrowLeft",
+        currentSeconds: 2,
+        durationSeconds: 10,
+        shiftKey: true,
+      }),
+    ).toBe(0);
+    expect(
+      keyboardSeekSeconds({
+        key: "End",
+        currentSeconds: 2,
+        durationSeconds: 10,
+      }),
+    ).toBe(10);
+    expect(
+      keyboardSeekSeconds({
+        key: "Space",
+        currentSeconds: 2,
+        durationSeconds: 10,
+      }),
+    ).toBeUndefined();
+  });
+
   it("excludes invalid intervals from coaching metric frames", () => {
     const exclusions = [{ startUs: 0, endUs: 600_000, reason: "countdown" }];
     expect(isExcludedFromMetrics(100_000, exclusions)).toBe(true);
@@ -141,6 +195,15 @@ describe("review timeline", () => {
       cues,
       drill,
       speakingWindows: [{ startUs: 1_250_000, endUs: 2_750_000 }],
+      bookmarks: [
+        {
+          id: "bookmark-1",
+          sessionId: "session-report-1",
+          timestampUs: 500_000,
+          note: "Strong recovery",
+          createdAt: "2026-07-25T12:01:00.000Z",
+        },
+      ],
       originUs,
       durationUs: 3_000_000,
     });
@@ -148,10 +211,12 @@ describe("review timeline", () => {
     expect(report.summary.cueCount).toBe(1);
     expect(report.summary.breakCount).toBe(1);
     expect(report.summary.speakingSeconds).toBe(1.5);
+    expect(report.summary.bookmarkCount).toBe(1);
     expect(report.summary.drillId).toBe("presentation-rehearsal-01");
     expect(report.markdown).toContain("# Session report");
     expect(report.markdown).toContain("Cues: 1");
     expect(report.markdown).toContain("Speaking: 1.5s");
-    expect(report.lanes.length).toBe(6);
+    expect(report.markdown).toContain("Bookmarks: 1");
+    expect(report.lanes.length).toBe(7);
   });
 });
