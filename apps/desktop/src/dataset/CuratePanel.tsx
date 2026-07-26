@@ -9,6 +9,8 @@ import {
   assertCanPromoteToDataset,
   createHumanClip,
   curationReasonTags,
+  detectSpeechStructure,
+  scoreTechnicalQuality,
   toggleClipReasonTag,
   type CurationKeyAction,
 } from "../../../../packages/dataset/src";
@@ -88,6 +90,65 @@ export function CuratePanel({
         : "Not promotion-ready.";
     }
   }, [consents, selectedSession]);
+  const selectedQuality = useMemo(() => {
+    if (!selected || !selectedSession) return undefined;
+    const originUs =
+      selectedSession.manifest.media?.monotonicStartUs ??
+      selectedSession.manifest.monotonicStartUs;
+    const absoluteStartUs = originUs + selected.startUs;
+    const absoluteEndUs = originUs + selected.endUs;
+    const predictions = selectedSession.predictions.filter(
+      (prediction) =>
+        prediction.timestampUs >= absoluteStartUs &&
+        prediction.timestampUs <= absoluteEndUs,
+    );
+    const features = selectedSession.features.filter(
+      (feature) =>
+        feature.timestampUs >= absoluteStartUs &&
+        feature.timestampUs <= absoluteEndUs,
+    );
+    const speakingWindows = (selectedSession.speakingWindows ?? [])
+      .map((window) =>
+        window.startUs >= originUs
+          ? window
+          : {
+              startUs: originUs + window.startUs,
+              endUs: originUs + window.endUs,
+            },
+      )
+      .filter(
+        (window) =>
+          window.startUs < absoluteEndUs &&
+          window.endUs > absoluteStartUs,
+      );
+    const transcript =
+      selectedSession.correctedTranscript ?? selectedSession.transcript;
+    const speechStructureEvents = transcript
+      ? detectSpeechStructure(
+          selectedSession.manifest.id,
+          transcript.words,
+          speakingWindows.map((window) => ({
+            startUs: Math.max(0, window.startUs - originUs),
+            endUs: Math.max(0, window.endUs - originUs),
+          })),
+        ).events.filter(
+          (event) =>
+            event.startUs < selected.endUs && event.endUs > selected.startUs,
+        )
+      : undefined;
+    return scoreTechnicalQuality({
+      predictions,
+      features,
+      speakingWindows,
+      droppedFrameCount: selectedSession.manifest.droppedFrameCount,
+      totalFrames: selectedSession.manifest.frameCount,
+      blinkFrameCount: features.length
+        ? features.filter((feature) => feature.blink).length
+        : undefined,
+      syncConfidence: selectedSession.manifest.dataset?.avTiming?.syncConfidence,
+      speechStructureEvents,
+    });
+  }, [selected, selectedSession]);
 
   const persist = async (next: ClipCandidate[]) => {
     await store.clips.putAll(next);
@@ -231,6 +292,56 @@ export function CuratePanel({
           <p className={promotionStatus.startsWith("Dataset") ? "pass" : "muted"}>
             {promotionStatus}
           </p>
+          {selectedQuality && (
+            <>
+              <div className="metrics-grid">
+                <div>
+                  <strong>
+                    {Math.round(
+                      selectedQuality.video.faceDetectedRatio * 100,
+                    )}
+                    %
+                  </strong>
+                  <span>Face detected</span>
+                </div>
+                <div>
+                  <strong>
+                    {Math.round(
+                      selectedQuality.performance.contactDuringSpeaking * 100,
+                    )}
+                    %
+                  </strong>
+                  <span>Contact while speaking</span>
+                </div>
+                <div>
+                  <strong>
+                    {(
+                      selectedQuality.video.droppedFrameRatio * 100
+                    ).toFixed(2)}
+                    %
+                  </strong>
+                  <span>Dropped frames (session)</span>
+                </div>
+                <div>
+                  <strong>
+                    {Math.round(
+                      selectedQuality.performance.completeUtteranceProxy * 100,
+                    )}
+                    %
+                  </strong>
+                  <span>Complete utterance proxy</span>
+                </div>
+              </div>
+              <p className="muted">
+                {selectedQuality.scoringVersion} · recommendation only
+                {selectedQuality.warnings.length
+                  ? ` · unavailable: ${selectedQuality.warnings
+                      .map((warning) => warning.replace("_unmeasured", ""))
+                      .join(", ")}`
+                  : ""}
+              </p>
+            </>
+          )}
           {mediaUrl ? (
             <>
               <video ref={playerRef} src={mediaUrl} controls playsInline />

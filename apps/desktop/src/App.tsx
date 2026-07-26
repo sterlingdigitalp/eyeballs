@@ -2416,21 +2416,27 @@ function Review({
   const selected = sessions.find((session) => session.manifest.id === selectedId) ?? sessions[0];
   const effectiveTranscript =
     selected?.correctedTranscript ?? selected?.transcript;
-  const speechStructureAnalysis = useMemo(
-    () =>
-      selected && effectiveTranscript
-        ? detectSpeechStructure(
-            selected.manifest.id,
-            effectiveTranscript.words,
-            selected.speakingWindows,
-          )
-        : undefined,
-    [effectiveTranscript, selected],
-  );
   const reviewOriginUs =
     selected?.manifest.media?.monotonicStartUs ??
     selected?.manifest.monotonicStartUs ??
     0;
+  const speechStructureAnalysis = useMemo(() => {
+    if (!selected || !effectiveTranscript) return undefined;
+    const relativeSpeakingWindows = (selected.speakingWindows ?? []).map(
+      (window) =>
+        window.startUs >= reviewOriginUs
+          ? {
+              startUs: window.startUs - reviewOriginUs,
+              endUs: Math.max(0, window.endUs - reviewOriginUs),
+            }
+          : window,
+    );
+    return detectSpeechStructure(
+      selected.manifest.id,
+      effectiveTranscript.words,
+      relativeSpeakingWindows,
+    );
+  }, [effectiveTranscript, reviewOriginUs, selected]);
   const metrics = useMemo(
     () => selected ? calculateConfusionMatrix(selected.predictions, selected.corrections) : undefined,
     [selected],

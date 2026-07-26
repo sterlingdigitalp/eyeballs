@@ -2441,6 +2441,17 @@ Automatic segment proposal must not copy media until the user approves or an exp
 
 Keep component scores visible:
 
+Implementation note — 2026-07-26:
+
+- `technical-quality/1.0.0` exposes component scores, measurement-availability
+  flags, and warnings rather than inventing favorable defaults for absent
+  audio, sharpness, exposure, blink, or sync evidence;
+- contact-during-speaking is now calculated only from predictions inside
+  persisted VAD windows, and verbal-mistake candidates reduce the
+  complete-utterance proxy;
+- Curate displays the available face, contact, dropped-frame, and utterance
+  components for the selected clip and labels the result recommendation-only.
+
 #### Video
 
 - face detected ratio;
