@@ -204,6 +204,9 @@ describe("review timeline", () => {
           createdAt: "2026-07-25T12:01:00.000Z",
         },
       ],
+      sentences: [
+        { index: 0, startUs: 0, endUs: 500_000, text: "Opening." },
+      ],
       originUs,
       durationUs: 3_000_000,
     });
@@ -212,11 +215,13 @@ describe("review timeline", () => {
     expect(report.summary.breakCount).toBe(1);
     expect(report.summary.speakingSeconds).toBe(1.5);
     expect(report.summary.bookmarkCount).toBe(1);
+    expect(report.summary.sentenceCount).toBe(1);
     expect(report.summary.drillId).toBe("presentation-rehearsal-01");
     expect(report.markdown).toContain("# Session report");
     expect(report.markdown).toContain("Cues: 1");
     expect(report.markdown).toContain("Speaking: 1.5s");
     expect(report.markdown).toContain("Bookmarks: 1");
+    expect(report.markdown).toContain("Sentences: 1");
     expect(report.lanes.length).toBe(7);
   });
 });

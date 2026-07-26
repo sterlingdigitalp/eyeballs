@@ -1969,6 +1969,12 @@ Implemented and covered by device-free tests:
   and Markdown/JSON session reports;
 - synchronized Review evidence lanes with 1×/2×/4×/8× zoom, keyboard seeking,
   and durable timestamped bookmark annotations;
+- validated, persisted transcript documents with session-relative word and
+  sentence timestamps, immutable model/stub evidence, and a separately
+  revisioned user-corrected copy;
+- Review import for timestamped transcript JSON plus manual add/edit/delete
+  controls for non-overlapping sentence boundaries, with corrected boundaries
+  feeding the timeline, analysis export, and Markdown/JSON session report;
 - accessible rolling sparklines for every like-for-like Progress metric, while
   retaining baseline identity and measurement-degradation warnings;
 - hands-free drill guidance: spoken instruction, four-second settle interval,
@@ -1986,8 +1992,8 @@ Still requiring live validation after CaptureCore releases the Brio and Yeti:
 Still open for later Phase 2 slices:
 
 - custom-drill editing/deletion and richer per-beat timing controls;
-- local ASR and editable sentence alignment;
-- editable transcript/sentence boundaries and explicit clip in/out controls;
+- local ASR worker integration and automatic transcript attachment;
+- word-text correction and explicit clip in/out controls;
 - optional non-manipulative practice-streak decision;
 - real transparent always-on-top Tauri live-assist window and global shortcut.
 
@@ -2052,12 +2058,12 @@ Outputs:
 
 Tasks:
 
-- [ ] Implement cue suppression during blinks and unknown tracking.
-- [ ] Implement per-drill thresholds.
-- [ ] Add cue rate limit.
-- [ ] Log every cue with the evidence that caused it.
-- [ ] Let review jump to cue moments.
-- [ ] Let the user mark a cue helpful, unnecessary, or wrong.
+- [x] Implement cue suppression during blinks and unknown tracking.
+- [x] Implement per-drill thresholds.
+- [x] Add cue rate limit.
+- [x] Log every cue with the evidence that caused it.
+- [x] Let review jump to cue moments.
+- [x] Let the user mark a cue helpful, unnecessary, or wrong.
 - [ ] Use cue feedback to tune policy, not silently retrain identity models.
 
 ### 12.6 Work package P2-D — Speaking and sentence alignment
@@ -2072,6 +2078,16 @@ To calculate contact at sentence boundaries:
 
 The live coaching loop must not wait for transcription. Sentence-boundary metrics are review features.
 
+Implementation status:
+
+- [x] Keep live coaching independent of ASR.
+- [x] Persist VAD speaking windows for post-session review.
+- [x] Materialize word timestamps and inferred sentence boundaries from post-session worker output.
+- [x] Preserve original model/stub transcript evidence separately from corrections.
+- [x] Import, add, edit, delete, validate, and persist sentence-boundary corrections.
+- [ ] Integrate and supervise a local Whisper/MLX-Whisper worker.
+- [ ] Add direct word-text correction in Review.
+
 ### 12.7 Work package P2-E — Review timeline
 
 Tasks:
@@ -2081,7 +2097,7 @@ Tasks:
 - [x] Click event to seek playback.
 - [x] Show contact, near-lens, away, and unknown separately.
 - [x] Show cue markers.
-- [ ] Show transcript and sentence boundaries.
+- [x] Show transcript and sentence boundaries.
 - [x] Show allowed-note intervals.
 - [x] Add user annotations and bookmarks.
 - [ ] Add clip in/out points, but do not yet promote automatically to a dataset.
@@ -2319,12 +2335,12 @@ Every step has:
 Tasks:
 
 - [ ] Run local Whisper/MLX-Whisper.
-- [ ] Preserve word-level timestamps when available.
-- [ ] Run voice activity detection.
+- [x] Preserve word-level timestamps when available.
+- [x] Run voice activity detection.
 - [ ] Detect long pauses, retakes, false starts, and interruptions.
-- [ ] Allow transcript correction.
-- [ ] Preserve original model output and corrected text separately.
-- [ ] Derive sentence and utterance boundaries.
+- [x] Allow sentence-boundary correction; direct word-text editing remains open.
+- [x] Preserve original model output and corrected text separately.
+- [x] Derive sentence boundaries from timestamped words; richer utterance boundaries remain open.
 - [ ] Mark sections with crosstalk or external audio.
 - [ ] Never infer consent from spoken words; consent remains a separate UI action.
 

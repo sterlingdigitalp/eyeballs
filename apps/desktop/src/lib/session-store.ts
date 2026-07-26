@@ -9,6 +9,7 @@ import {
   reviewBookmarkSchema,
   sessionManifestSchema,
   speakingWindowSchema,
+  transcriptDocumentSchema,
 } from "../../../../packages/contracts/src";
 import { z } from "zod";
 
@@ -22,6 +23,8 @@ const storedSessionSchema = z.object({
   bookmarks: z.array(reviewBookmarkSchema).optional(),
   cues: z.array(cueEventSchema).optional(),
   speakingWindows: z.array(speakingWindowSchema).optional(),
+  transcript: transcriptDocumentSchema.optional(),
+  correctedTranscript: transcriptDocumentSchema.optional(),
   media: z.instanceof(Blob).optional(),
 });
 
@@ -100,6 +103,22 @@ const optionalLonger = <T>(
   return longer(first, second);
 };
 
+const preferredTranscript = <T extends {
+  updatedAt?: string;
+}>(
+  browser: T | undefined,
+  native: T | undefined,
+): T | undefined => {
+  if (!browser) return native;
+  if (!native) return browser;
+  if (browser.updatedAt && native.updatedAt) {
+    return browser.updatedAt >= native.updatedAt ? browser : native;
+  }
+  // Writes reach browser storage before the native mirror, so browser is the
+  // recoverable source of truth if one side lacks a revision timestamp.
+  return browser;
+};
+
 export function mergeStoredSessions(
   browserSessions: StoredSession[],
   nativeSessions: StoredSession[] = [],
@@ -128,6 +147,11 @@ export function mergeStoredSessions(
       speakingWindows: optionalLonger(
         browser.speakingWindows,
         native.speakingWindows,
+      ),
+      transcript: preferredTranscript(browser.transcript, native.transcript),
+      correctedTranscript: preferredTranscript(
+        browser.correctedTranscript,
+        native.correctedTranscript,
       ),
       calibrationSnapshot:
         browser.calibrationSnapshot ?? native.calibrationSnapshot,

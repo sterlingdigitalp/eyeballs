@@ -15,6 +15,7 @@ import type {
   SessionManifest,
   FeatureVector,
   SpeakingWindowRecord,
+  TranscriptDocument,
 } from "../../../../packages/contracts/src";
 import {
   calibrationSchema,
@@ -42,6 +43,10 @@ export interface StoredSession {
   bookmarks?: ReviewBookmark[];
   cues?: CueEvent[];
   speakingWindows?: SpeakingWindowRecord[];
+  /** Immutable model/stub transcript evidence. */
+  transcript?: TranscriptDocument;
+  /** User-corrected words and/or sentence boundaries. */
+  correctedTranscript?: TranscriptDocument;
   media?: Blob;
 }
 

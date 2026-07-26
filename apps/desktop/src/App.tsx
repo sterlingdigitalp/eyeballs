@@ -18,9 +18,14 @@ import type {
   GazeState,
   RecordingAsset,
   ReviewBookmark,
+  SentenceBoundary,
   SessionManifest,
+  TranscriptDocument,
 } from "../../../packages/contracts/src";
-import { gazePredictionSchema } from "../../../packages/contracts/src";
+import {
+  gazePredictionSchema,
+  transcriptDocumentSchema,
+} from "../../../packages/contracts/src";
 import {
   ALGORITHM_VERSION,
   classifyFrame,
@@ -84,8 +89,10 @@ import {
   type TrainSessionState,
 } from "../../../packages/coaching/src";
 import {
+  applySentenceBoundaryCorrections,
   attachDatasetIntent,
   evaluatePreflight,
+  materializeTranscript,
   proposeSegments,
 } from "../../../packages/dataset/src";
 import {
@@ -2307,8 +2314,18 @@ function Review({
     useState<ReviewTimelineZoom>(1);
   const [bookmarkNote, setBookmarkNote] = useState("");
   const [bookmarkError, setBookmarkError] = useState<string>();
+  const [sentenceDraft, setSentenceDraft] = useState({
+    start: "0",
+    end: "1",
+    text: "",
+  });
+  const [editingSentenceIndex, setEditingSentenceIndex] = useState<number>();
+  const [transcriptError, setTranscriptError] = useState<string>();
+  const [transcriptNotice, setTranscriptNotice] = useState<string>();
   const playbackRef = useRef<HTMLVideoElement>(null);
   const selected = sessions.find((session) => session.manifest.id === selectedId) ?? sessions[0];
+  const effectiveTranscript =
+    selected?.correctedTranscript ?? selected?.transcript;
   const reviewOriginUs =
     selected?.manifest.media?.monotonicStartUs ??
     selected?.manifest.monotonicStartUs ??
@@ -2389,10 +2406,17 @@ function Review({
             cues: selected.cues,
             drill: reviewDrill,
             speakingWindows: selected.speakingWindows,
+            sentences: effectiveTranscript?.sentences,
             bookmarks: selected.bookmarks,
           })
         : [],
-    [reviewDrill, reviewOriginUs, selected, timelineDurationUs],
+    [
+      effectiveTranscript?.sentences,
+      reviewDrill,
+      reviewOriginUs,
+      selected,
+      timelineDurationUs,
+    ],
   );
   const mediaUrl = useMemo(() => selected?.media ? URL.createObjectURL(selected.media) : undefined, [selected]);
   useEffect(() => () => { if (mediaUrl) URL.revokeObjectURL(mediaUrl); }, [mediaUrl]);
@@ -2402,6 +2426,10 @@ function Review({
     setTimelineZoom(1);
     setBookmarkNote("");
     setBookmarkError(undefined);
+    setSentenceDraft({ start: "0", end: "1", text: "" });
+    setEditingSentenceIndex(undefined);
+    setTranscriptError(undefined);
+    setTranscriptNotice(undefined);
   }, [selected?.manifest.id]);
 
   const addCorrection = async () => {
@@ -2552,6 +2580,8 @@ function Review({
       cues: selected.cues ?? [],
       speakingWindows: selected.speakingWindows ?? [],
       bookmarks: selected.bookmarks ?? [],
+      transcript: selected.transcript,
+      correctedTranscript: selected.correctedTranscript,
     });
   };
 
@@ -2564,6 +2594,7 @@ function Review({
       cues: selected.cues,
       drill: reviewDrill,
       speakingWindows: selected.speakingWindows,
+      sentences: effectiveTranscript?.sentences,
       bookmarks: selected.bookmarks,
       originUs: reviewOriginUs,
       durationUs: timelineDurationUs || 1,
@@ -2652,6 +2683,184 @@ function Review({
           cause instanceof Error ? cause.message : String(cause)
         }`,
       );
+    }
+  };
+
+  const persistSentenceBoundaries = async (
+    sentences: SentenceBoundary[],
+    successMessage: string,
+  ) => {
+    if (!selected) return;
+    try {
+      const original =
+        selected.transcript ??
+        materializeTranscript(selected.manifest.id, {
+          status: "absent",
+          error: "manual_review_before_asr",
+        });
+      const { corrected } = applySentenceBoundaryCorrections(
+        original,
+        sentences,
+        effectiveTranscript?.words ?? original.words,
+      );
+      const updated: StoredSession = {
+        ...selected,
+        transcript: original,
+        correctedTranscript: corrected,
+      };
+      await store.sessions.put(updated);
+      onUpdated(updated);
+      setTranscriptError(undefined);
+      setTranscriptNotice(successMessage);
+    } catch (cause) {
+      setTranscriptError(
+        `Sentence boundaries could not be saved: ${
+          cause instanceof Error ? cause.message : String(cause)
+        }`,
+      );
+      throw cause;
+    }
+  };
+
+  const loadTranscript = async (file?: File) => {
+    if (!file || !selected) return;
+    try {
+      const parsed = transcriptDocumentSchema.parse(
+        JSON.parse(await file.text()),
+      );
+      if (parsed.sessionId !== selected.manifest.id) {
+        throw new Error(
+          `Transcript belongs to session ${parsed.sessionId}, not the selected session.`,
+        );
+      }
+      const availableUs = timelineDurationUs;
+      if (
+        availableUs > 0 &&
+        parsed.sentences.some((sentence) => sentence.endUs > availableUs + 50_000)
+      ) {
+        throw new Error("A sentence boundary falls outside the recorded session.");
+      }
+      let updated: StoredSession;
+      if (parsed.origin === "user_corrected") {
+        const original =
+          selected.transcript ??
+          materializeTranscript(selected.manifest.id, {
+            status: "absent",
+            error: "corrected_transcript_imported_without_original",
+          });
+        const corrected: TranscriptDocument = {
+          ...applySentenceBoundaryCorrections(
+            original,
+            parsed.sentences,
+            parsed.words,
+          ).corrected,
+          modelVersion: parsed.modelVersion,
+          updatedAt: parsed.updatedAt ?? new Date().toISOString(),
+        };
+        updated = {
+          ...selected,
+          transcript: original,
+          correctedTranscript: corrected,
+        };
+      } else {
+        updated = {
+          ...selected,
+          transcript: {
+            ...parsed,
+            updatedAt: parsed.updatedAt ?? new Date().toISOString(),
+          },
+          correctedTranscript: undefined,
+        };
+      }
+      await store.sessions.put(updated);
+      onUpdated(updated);
+      setTranscriptError(undefined);
+      setTranscriptNotice(
+        parsed.origin === "user_corrected"
+          ? "Corrected transcript imported; the original evidence remains separate."
+          : "Timestamped transcript imported and attached to this session.",
+      );
+    } catch (cause) {
+      setTranscriptNotice(undefined);
+      setTranscriptError(
+        `Transcript import failed: ${
+          cause instanceof Error ? cause.message : String(cause)
+        }`,
+      );
+    }
+  };
+
+  const saveSentenceBoundary = async () => {
+    if (!selected) return;
+    const startSeconds = Number(sentenceDraft.start);
+    const endSeconds = Number(sentenceDraft.end);
+    const text = sentenceDraft.text.trim();
+    const availableSeconds = timelineDurationUs / 1_000_000;
+    if (
+      !Number.isFinite(startSeconds) ||
+      !Number.isFinite(endSeconds) ||
+      startSeconds < 0 ||
+      endSeconds <= startSeconds ||
+      !text
+    ) {
+      setTranscriptError(
+        "Enter sentence text, a non-negative start, and an end after the start.",
+      );
+      return;
+    }
+    if (availableSeconds <= 0 || endSeconds > availableSeconds + 0.05) {
+      setTranscriptError(
+        `The sentence must end within the ${availableSeconds.toFixed(2)}-second session.`,
+      );
+      return;
+    }
+    const current = effectiveTranscript?.sentences ?? [];
+    const next = current.filter(
+      (sentence) => sentence.index !== editingSentenceIndex,
+    );
+    next.push({
+      index: editingSentenceIndex ?? next.length,
+      startUs: Math.round(startSeconds * 1_000_000),
+      endUs: Math.round(endSeconds * 1_000_000),
+      text,
+    });
+    try {
+      await persistSentenceBoundaries(
+        next,
+        editingSentenceIndex === undefined
+          ? "Sentence boundary added."
+          : "Sentence boundary updated.",
+      );
+      setSentenceDraft({ start: "0", end: "1", text: "" });
+      setEditingSentenceIndex(undefined);
+    } catch {
+      // The persistence helper exposes a user-readable validation error.
+    }
+  };
+
+  const editSentenceBoundary = (sentence: SentenceBoundary) => {
+    setSentenceDraft({
+      start: (sentence.startUs / 1_000_000).toFixed(2),
+      end: (sentence.endUs / 1_000_000).toFixed(2),
+      text: sentence.text,
+    });
+    setEditingSentenceIndex(sentence.index);
+    setTranscriptError(undefined);
+    setTranscriptNotice(undefined);
+  };
+
+  const removeSentenceBoundary = async (sentenceIndex: number) => {
+    const remaining = (effectiveTranscript?.sentences ?? []).filter(
+      (sentence) => sentence.index !== sentenceIndex,
+    );
+    try {
+      await persistSentenceBoundaries(remaining, "Sentence boundary deleted.");
+      if (editingSentenceIndex === sentenceIndex) {
+        setEditingSentenceIndex(undefined);
+        setSentenceDraft({ start: "0", end: "1", text: "" });
+      }
+    } catch {
+      // The persistence helper exposes a user-readable validation error.
     }
   };
 
@@ -2790,6 +2999,111 @@ function Review({
                   </div>
                 </div>
               ))}
+            </div>
+            <div className="panel transcript-panel">
+              <h2>Transcript and sentence boundaries</h2>
+              <p className="muted">
+                {effectiveTranscript
+                  ? `${effectiveTranscript.sentences.length} sentences · ${effectiveTranscript.origin} · ${effectiveTranscript.modelVersion}`
+                  : "No timestamped transcript is attached. Import worker output or add boundaries manually."}
+                {selected.correctedTranscript
+                  ? " Original transcript evidence is preserved separately."
+                  : ""}
+              </p>
+              <label>
+                Import timestamped transcript JSON
+                <input
+                  type="file"
+                  accept="application/json,.json"
+                  onChange={(event) => void loadTranscript(event.target.files?.[0])}
+                />
+              </label>
+              <div className="correction-form">
+                <label>
+                  Start (s)
+                  <input
+                    value={sentenceDraft.start}
+                    onChange={(event) =>
+                      setSentenceDraft({
+                        ...sentenceDraft,
+                        start: event.target.value,
+                      })
+                    }
+                  />
+                </label>
+                <label>
+                  End (s)
+                  <input
+                    value={sentenceDraft.end}
+                    onChange={(event) =>
+                      setSentenceDraft({
+                        ...sentenceDraft,
+                        end: event.target.value,
+                      })
+                    }
+                  />
+                </label>
+                <label>
+                  Sentence
+                  <input
+                    value={sentenceDraft.text}
+                    placeholder="Timestamped sentence text"
+                    onChange={(event) =>
+                      setSentenceDraft({
+                        ...sentenceDraft,
+                        text: event.target.value,
+                      })
+                    }
+                  />
+                </label>
+                <button type="button" onClick={() => void saveSentenceBoundary()}>
+                  {editingSentenceIndex === undefined ? "Add boundary" : "Save boundary"}
+                </button>
+                {editingSentenceIndex !== undefined && (
+                  <button
+                    type="button"
+                    className="secondary"
+                    onClick={() => {
+                      setEditingSentenceIndex(undefined);
+                      setSentenceDraft({ start: "0", end: "1", text: "" });
+                    }}
+                  >
+                    Cancel
+                  </button>
+                )}
+              </div>
+              {(effectiveTranscript?.sentences ?? []).map((sentence) => (
+                <div className="cue-rating-row" key={sentence.index}>
+                  <button
+                    type="button"
+                    className="text-button"
+                    onClick={() => seekToTimelineUs(sentence.startUs)}
+                  >
+                    {(sentence.startUs / 1_000_000).toFixed(2)}–
+                    {(sentence.endUs / 1_000_000).toFixed(2)}s · {sentence.text}
+                  </button>
+                  <div className="button-row">
+                    <button
+                      type="button"
+                      className="secondary"
+                      onClick={() => editSentenceBoundary(sentence)}
+                    >
+                      Edit
+                    </button>
+                    <button
+                      type="button"
+                      className="secondary"
+                      onClick={() => void removeSentenceBoundary(sentence.index)}
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              ))}
+              {transcriptNotice && <p className="muted">{transcriptNotice}</p>}
+              {transcriptError && (
+                <p className="tracking-warning">{transcriptError}</p>
+              )}
             </div>
             <div className="panel bookmark-panel">
               <h2>Bookmarks and annotations</h2>

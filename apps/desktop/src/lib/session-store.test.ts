@@ -133,6 +133,34 @@ describe("session checkpoint merge", () => {
     expect(merged.speakingWindows).toEqual(native.speakingWindows);
   });
 
+  it("keeps original and corrected transcript revisions separate", () => {
+    const browser = session("1", "complete", 42);
+    browser.transcript = {
+      sessionId: "1",
+      modelVersion: "whisper/1",
+      origin: "model",
+      words: [{ text: "Hello.", startUs: 0, endUs: 400_000 }],
+      sentences: [{ index: 0, startUs: 0, endUs: 400_000, text: "Hello." }],
+      updatedAt: "2026-07-26T12:00:00.000Z",
+    };
+    browser.correctedTranscript = {
+      ...browser.transcript,
+      origin: "user_corrected",
+      sentences: [{ index: 0, startUs: 0, endUs: 500_000, text: "Hello." }],
+      updatedAt: "2026-07-26T12:02:00.000Z",
+    };
+    const native = session("1", "complete", 42);
+    native.transcript = browser.transcript;
+    native.correctedTranscript = {
+      ...browser.correctedTranscript,
+      sentences: [{ index: 0, startUs: 0, endUs: 450_000, text: "Hello." }],
+      updatedAt: "2026-07-26T12:01:00.000Z",
+    };
+    const [merged] = mergeStoredSessions([browser], [native]);
+    expect(merged.transcript?.origin).toBe("model");
+    expect(merged.correctedTranscript?.sentences[0].endUs).toBe(500_000);
+  });
+
   it("returns unique sessions newest first", () => {
     const merged = mergeStoredSessions(
       [session("1", "complete", 1)],

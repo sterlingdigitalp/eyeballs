@@ -2,6 +2,15 @@
  * Lightweight speaking detection for coaching.
  * Live coaching must never wait on full transcription.
  */
+import type {
+  SentenceBoundary,
+  TranscriptWord,
+} from "../../contracts/src";
+
+export type {
+  SentenceBoundary,
+  TranscriptWord,
+} from "../../contracts/src";
 
 export interface VadSample {
   /** RMS in linear amplitude 0–1, or approximate level. */
@@ -96,19 +105,6 @@ export class StreamingVad {
 /** Total speaking duration in seconds from windows. */
 export function speakingSeconds(windows: readonly SpeakingWindow[]): number {
   return windows.reduce((sum, window) => sum + (window.endUs - window.startUs) / 1_000_000, 0);
-}
-
-export interface TranscriptWord {
-  text: string;
-  startUs: number;
-  endUs: number;
-}
-
-export interface SentenceBoundary {
-  index: number;
-  startUs: number;
-  endUs: number;
-  text: string;
 }
 
 /**

@@ -508,6 +508,77 @@ export const reviewBookmarkSchema = z.object({
 });
 export type ReviewBookmark = z.infer<typeof reviewBookmarkSchema>;
 
+export const transcriptWordSchema = z
+  .object({
+    text: z.string().min(1),
+    /** Session-relative word start. */
+    startUs: z.number().int().nonnegative(),
+    /** Session-relative word end. */
+    endUs: z.number().int().nonnegative(),
+  })
+  .refine((word) => word.endUs >= word.startUs, {
+    message: "Transcript word endUs must be at or after startUs",
+    path: ["endUs"],
+  });
+export type TranscriptWord = z.infer<typeof transcriptWordSchema>;
+
+export const sentenceBoundarySchema = z
+  .object({
+    index: z.number().int().nonnegative(),
+    /** Session-relative sentence start. */
+    startUs: z.number().int().nonnegative(),
+    /** Session-relative sentence end. */
+    endUs: z.number().int().nonnegative(),
+    text: z.string().min(1),
+  })
+  .refine((sentence) => sentence.endUs > sentence.startUs, {
+    message: "Sentence endUs must be after startUs",
+    path: ["endUs"],
+  });
+export type SentenceBoundary = z.infer<typeof sentenceBoundarySchema>;
+
+export const transcriptDocumentSchema = z
+  .object({
+    sessionId: z.string().min(1),
+    modelVersion: z.string().min(1),
+    words: z.array(transcriptWordSchema),
+    sentences: z.array(sentenceBoundarySchema),
+    /** Model/stub output is retained even when a corrected copy exists. */
+    origin: z.enum(["model", "user_corrected", "stub"]),
+    stubReason: z.string().min(1).optional(),
+    updatedAt: z.string().datetime().optional(),
+  })
+  .superRefine((document, context) => {
+    document.words.forEach((word, index) => {
+      const previous = document.words[index - 1];
+      if (previous && word.startUs < previous.startUs) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Transcript words must be ordered by startUs",
+          path: ["words", index, "startUs"],
+        });
+      }
+    });
+    document.sentences.forEach((sentence, index) => {
+      const previous = document.sentences[index - 1];
+      if (sentence.index !== index) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Sentence indexes must be contiguous and ordered",
+          path: ["sentences", index, "index"],
+        });
+      }
+      if (previous && sentence.startUs < previous.endUs) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Sentence boundaries must not overlap",
+          path: ["sentences", index, "startUs"],
+        });
+      }
+    });
+  });
+export type TranscriptDocument = z.infer<typeof transcriptDocumentSchema>;
+
 export interface DeviceInventory {
   cameras: MediaDeviceInfo[];
   microphones: MediaDeviceInfo[];

@@ -343,6 +343,7 @@ export interface SessionReport {
     recoveryCount: number;
     speakingSeconds: number;
     bookmarkCount: number;
+    sentenceCount: number;
     contactRatio?: number;
     drillId?: string;
     feedbackIntensity?: string;
@@ -387,6 +388,7 @@ export function buildSessionReport(args: {
   const cueCount = args.cues?.length ?? 0;
   const spokenSeconds = speakingSeconds(args.speakingWindows ?? []);
   const bookmarkCount = args.bookmarks?.length ?? 0;
+  const sentenceCount = args.sentences?.length ?? 0;
   const markdown = [
     `# Session report`,
     ``,
@@ -402,6 +404,7 @@ export function buildSessionReport(args: {
     `- Cues: ${cueCount}`,
     `- Speaking: ${spokenSeconds.toFixed(1)}s`,
     `- Bookmarks: ${bookmarkCount}`,
+    `- Sentences: ${sentenceCount}`,
     ``,
     `## Lanes`,
     ...lanes.map(
@@ -421,6 +424,7 @@ export function buildSessionReport(args: {
       recoveryCount,
       speakingSeconds: spokenSeconds,
       bookmarkCount,
+      sentenceCount,
       contactRatio,
       drillId: args.manifest.coaching?.drillId,
       feedbackIntensity: args.manifest.coaching?.feedbackIntensity,
