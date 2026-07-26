@@ -11,6 +11,7 @@
     "soak:macbook": "sh scripts/dev/run-capture-core-soak.sh macbook",
     "validate:capture-session": "sh scripts/dev/validate-capture-session.sh",
     "test:capture-core-stage6-scaffold": "sh scripts/dev/test-capture-core-stage6-scaffold.sh",
+    "analyze:capture-session": "python3 scripts/dev/analyze-capture-session.py",
     "fixture:av": "sh scripts/dev/generate-synthetic-av-fixture.sh",
     "dev": "vite",
     "build": "tsc -b && vite build",

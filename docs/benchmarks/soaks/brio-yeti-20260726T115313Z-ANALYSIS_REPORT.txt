@@ -1,0 +1,28 @@
+CaptureCore session analysis (Stage 6)
+sessionRoot=/private/tmp/capture-core-soak/brio-yeti-20260726T115313Z/session
+events=/private/tmp/capture-core-soak/brio-yeti-20260726T115313Z/events.jsonl
+eventCount=16880
+segmentFinalizedCount=345
+healthSampleCount=1722
+
+## Finished honesty
+measuredVideoFps=23.965375896409814
+negotiated=3840x2160@30
+wallDurationSec=3600.2773489952087
+avInitialOffsetUs=53370 (53.37 ms)
+videoFrames=86282 droppedVideo=0
+previewFrames=14808
+
+## Segment boundary (firstVideoPtsUs gaps)
+count=344
+meanSec=10.4545 medianSec=10.4583
+minSec=10.1667 maxSec=10.6667
+outlierCount=0 (outside 50–150% of segmentDuration)
+
+## Health instantaneous FPS (between health samples)
+count=1721 mean=23.967 median=23.913 min=23.142 max=24.961
+
+## Disk free (from health)
+start=730538531223.0 end=730538531223.0 approxConsumedBytes=0.0
+
+RESULT=ANALYZED

@@ -1,0 +1,60 @@
+{
+  "boundary": {
+    "finalizeWallGap": {
+      "count": 344,
+      "maxMs": 10663.675,
+      "maxUs": 10663675.0,
+      "meanMs": 10435.042305232559,
+      "meanUs": 10435042.305232558,
+      "medianMs": 10461.5535,
+      "medianUs": 10461553.5,
+      "minMs": 3854.702,
+      "minUs": 3854702.0,
+      "stdevUs": 367693.67033532105
+    },
+    "note": "videoPtsGap is \u0394 firstVideoPtsUs between consecutive segment_finalized events. Near segmentDurationSec (e.g. 10s) is healthy; large outliers need review.",
+    "outlierCount": 0,
+    "outlierGaps": [],
+    "videoPtsGap": {
+      "count": 344,
+      "maxMs": 10666.667,
+      "maxUs": 10666667.0,
+      "meanMs": 10454.45736627907,
+      "meanUs": 10454457.36627907,
+      "medianMs": 10458.334,
+      "medianUs": 10458334.0,
+      "minMs": 10166.667,
+      "minUs": 10166667.0,
+      "stdevUs": 96861.695834142
+    }
+  },
+  "eventCount": 16880,
+  "eventsPath": "/private/tmp/capture-core-soak/brio-yeti-20260726T115313Z/events.jsonl",
+  "finished": {
+    "avInitialOffsetUs": 53370,
+    "droppedVideo": 0,
+    "finalizedSegments": 345,
+    "measuredVideoFps": 23.965375896409814,
+    "negotiatedFrameRate": 30,
+    "negotiatedHeight": 2160,
+    "negotiatedWidth": 3840,
+    "previewFrames": 14808,
+    "videoFrames": 86282,
+    "wallDurationSec": 3600.2773489952087
+  },
+  "healthSampleCount": 1722,
+  "healthTrends": {
+    "approxBytesWrittenFromDiskFree": 0.0,
+    "diskFreeBytesEnd": 730538531223.0,
+    "diskFreeBytesStart": 730538531223.0,
+    "instantaneousFps": {
+      "count": 1721,
+      "max": 24.960616385938224,
+      "mean": 23.966862955308923,
+      "median": 23.91321606929859,
+      "min": 23.14226660180404
+    }
+  },
+  "segmentFinalizedCount": 345,
+  "sessionRoot": "/private/tmp/capture-core-soak/brio-yeti-20260726T115313Z/session"
+}

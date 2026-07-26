@@ -220,6 +220,14 @@ if path.is_file():
 print(dict(types))
 PY
 
+# Boundary / FPS / disk analysis (does not fail the soak by itself)
+set +e
+python3 "$ROOT/scripts/dev/analyze-capture-session.py" "$SESSION" "$LOG/events.jsonl" \
+  >"$LOG/analyze.stdout" 2>"$LOG/analyze.stderr"
+set -e
+cp -f "$SESSION/ANALYSIS_REPORT.txt" "$LOG/ANALYSIS_REPORT.txt" 2>/dev/null || true
+cp -f "$SESSION/analysis.json" "$LOG/analysis.json" 2>/dev/null || true
+
 # SOAK_RESULT
 RESULT_FILE="$LOG/SOAK_RESULT.txt"
 STATUS="FAIL"
@@ -249,17 +257,9 @@ fi
   echo "events=$LOG/events.jsonl"
   echo "stderr=$LOG/stderr.txt"
   echo "validation=$LOG/VALIDATION_REPORT.txt"
+  echo "analysis=$LOG/ANALYSIS_REPORT.txt"
   echo "finished=$(test -f "$SESSION/recording-finished.json" && echo yes || echo no)"
   echo "seal=$(test -f "$SESSION/session-seal.json" && echo yes || echo no)"
-  if [ -f "$SESSION/recording-finished.json" ]; then
-    python3 - <<'PY' 2>/dev/null || true
-import json
-from pathlib import Path
-import os
-p=Path(os.environ.get("SESSION","") or "")
-# path injected below
-PY
-  fi
 } >"$RESULT_FILE"
 
 # Attach key finished metrics

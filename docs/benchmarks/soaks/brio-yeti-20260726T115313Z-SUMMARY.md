@@ -45,3 +45,16 @@ droppedVideo=0
 | Row | Result |
 |---|---|
 | 1h Brio 4K + Yeti soak | **PASS** |
+
+## Post-soak analysis (added)
+
+See `brio-yeti-20260726T115313Z-ANALYSIS_REPORT.txt`.
+
+| Check | Result |
+|---|---|
+| Segment boundary firstVideoPts gaps | **344** pairs · mean **~10.45 s** · min 10.17 · max 10.67 · **0 outliers** |
+| Instantaneous FPS (health Δ) | mean **~23.97** · range 23.14–24.96 (matches measured ~23.97) |
+| A/V initial offset | **53.4 ms** |
+| Disk free from health | Unchanged across samples (instrumentation sticky; use `du` for growth ~14 GiB) |
+
+**Boundary continuity:** first-PTS method shows stable ~segment-duration spacing for the full hour.

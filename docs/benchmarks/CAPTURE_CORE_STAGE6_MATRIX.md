@@ -14,8 +14,9 @@ Stage 6 proves **honesty under adverse conditions**, not a redesign.
 |---|---|
 | `scripts/dev/run-capture-core-soak.sh` | Unattended soak (Terminal / packaged CaptureCore.app) |
 | `scripts/dev/validate-capture-session.sh` | Every segment: decode (ffprobe) + SHA-256 vs seal |
+| `scripts/dev/analyze-capture-session.py` | Boundary gaps, health FPS, disk free trend |
 | Session `recording-finished.json` | Negotiated format, **measuredVideoFps**, A/V offset |
-| Session `session-seal.json` | Rust hashes + `capture` metrics block |
+| Session `session-seal.json` | Hashes + `capture` metrics block (CLI soaks sealed post-hoc) |
 | Run dir `SOAK_RESULT.txt` | Single-file pass/fail after soak |
 
 ### Unattended 1h Brio 4K + Yeti
@@ -100,7 +101,8 @@ CaptureCore is production-ready when **all** are true and committed:
 | Closed segment decode + hash | `validate-capture-session.sh` (**proven** on 690 files, 1h soak) |
 | Honest measured FPS | `recording-finished.json` → `measuredVideoFps` + seal `capture` (**~24 fps** on 4K Brio soak) |
 | A/V initial offset | `avInitialOffsetUs` on finish (**53.4 ms** on 1h soak; hour-scale drift still open) |
-| Boundary continuity | **Not automated yet** — post-soak analysis of events |
+| Boundary continuity | `analyze-capture-session.py` — **1h soak: 0 outliers**, mean gap ~10.45s |
+| Failure policies | `CAPTURE_CORE_STAGE6_FAILURE_POLICIES.md` |
 | Unattended 1h run | `run-capture-core-soak.sh` (**proven**) |
 | Terminal soak seal | soak script now writes `session-seal.json` after capture |
 | Matrix document | this file |
