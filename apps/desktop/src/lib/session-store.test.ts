@@ -112,6 +112,15 @@ describe("session checkpoint merge", () => {
       note: "Keep this",
       createdAt: "2026-07-26T12:00:00.000Z",
     }];
+    browser.audioIssueAnnotations = [{
+      id: "audio-issue-1",
+      sessionId: "1",
+      startUs: 800,
+      endUs: 1_200,
+      kind: "external_audio",
+      note: "Doorbell",
+      createdAt: "2026-07-26T12:00:00.000Z",
+    }];
     const [merged] = mergeStoredSessions([browser], [native]);
     expect(merged.manifest.status).toBe("incomplete");
     expect(merged.features).toHaveLength(50);
@@ -119,6 +128,9 @@ describe("session checkpoint merge", () => {
     expect(merged.speakingWindows).toEqual(browser.speakingWindows);
     expect(merged.bookmarks).toEqual(browser.bookmarks);
     expect(merged.reviewClips).toEqual(browser.reviewClips);
+    expect(merged.audioIssueAnnotations).toEqual(
+      browser.audioIssueAnnotations,
+    );
   });
 
   it("keeps the richer native coaching evidence when browser evidence is stale", () => {

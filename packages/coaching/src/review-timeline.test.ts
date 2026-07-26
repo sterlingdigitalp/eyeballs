@@ -86,6 +86,16 @@ describe("review timeline", () => {
       sentences: [
         { index: 0, startUs: 100_000, endUs: 900_000, text: "Hello world." },
       ],
+      audioIssueAnnotations: [
+        {
+          id: "audio-1",
+          sessionId: "session-report-1",
+          startUs: 1_000_000,
+          endUs: 1_400_000,
+          kind: "crosstalk",
+          createdAt: "2026-07-25T12:01:00.000Z",
+        },
+      ],
     });
     expect(lanes.map((lane) => lane.id)).toEqual([
       "contact",
@@ -96,6 +106,7 @@ describe("review timeline", () => {
       "transcript",
       "bookmarks",
       "clips",
+      "audio-issues",
     ]);
     const contact = lanes.find((lane) => lane.id === "contact")!;
     expect(contact.segments.some((segment) => segment.label === "contact")).toBe(true);
@@ -120,6 +131,9 @@ describe("review timeline", () => {
 
     const transcript = lanes.find((lane) => lane.id === "transcript")!;
     expect(transcript.markers.some((marker) => marker.kind === "sentence_boundary")).toBe(true);
+    expect(
+      lanes.find((lane) => lane.id === "audio-issues")?.segments[0].kind,
+    ).toBe("crosstalk");
   });
 
   it("seeks timeline microseconds to media seconds", () => {
@@ -215,6 +229,17 @@ describe("review timeline", () => {
           createdAt: "2026-07-25T12:01:00.000Z",
         },
       ],
+      audioIssueAnnotations: [
+        {
+          id: "audio-1",
+          sessionId: "session-report-1",
+          startUs: 800_000,
+          endUs: 1_100_000,
+          kind: "external_audio",
+          note: "Doorbell",
+          createdAt: "2026-07-25T12:01:00.000Z",
+        },
+      ],
       sentences: [
         { index: 0, startUs: 0, endUs: 500_000, text: "Opening." },
       ],
@@ -228,6 +253,7 @@ describe("review timeline", () => {
     expect(report.summary.bookmarkCount).toBe(1);
     expect(report.summary.sentenceCount).toBe(1);
     expect(report.summary.reviewClipCount).toBe(1);
+    expect(report.summary.audioIssueCount).toBe(1);
     expect(report.summary.drillId).toBe("presentation-rehearsal-01");
     expect(report.markdown).toContain("# Session report");
     expect(report.markdown).toContain("Cues: 1");
@@ -235,6 +261,7 @@ describe("review timeline", () => {
     expect(report.markdown).toContain("Bookmarks: 1");
     expect(report.markdown).toContain("Sentences: 1");
     expect(report.markdown).toContain("Review clips: 1");
-    expect(report.lanes.length).toBe(8);
+    expect(report.markdown).toContain("external-audio ranges: 1");
+    expect(report.lanes.length).toBe(9);
   });
 });

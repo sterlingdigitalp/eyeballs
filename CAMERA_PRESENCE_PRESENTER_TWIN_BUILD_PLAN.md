@@ -2379,7 +2379,11 @@ Implementation note — 2026-07-26:
   transcript evidence;
 - the segment proposal engine rejects ranges overlapping false-start,
   retake, or interruption candidates while retaining long pauses as useful edit
-  handles.
+  handles;
+- Review persists human-confirmed crosstalk and external-audio ranges, displays
+  them on a dedicated timeline lane, includes them in reports/exports, and
+  rejects overlapping clean-segment proposals. Automated audio-source
+  classification remains worker-dependent.
 
 Tasks:
 
@@ -2390,7 +2394,7 @@ Tasks:
 - [x] Allow sentence-boundary and direct word-text correction with revision history.
 - [x] Preserve original model output and corrected text separately.
 - [x] Derive sentence boundaries from timestamped words; richer utterance boundaries remain open.
-- [ ] Mark sections with crosstalk or external audio.
+- [x] Mark human-reviewed sections with crosstalk or external audio; automated detection remains open.
 - [x] Never infer consent from spoken words; consent remains a separate UI action.
 
 ### 13.8 Work package P3-F — Offline face and motion analysis

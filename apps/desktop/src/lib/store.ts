@@ -2,6 +2,7 @@ import { openDB, type DBSchema, type IDBPDatabase } from "idb";
 import { invoke } from "@tauri-apps/api/core";
 import type {
   Calibration,
+  AudioIssueAnnotation,
   CaptureProfile,
   ClipCandidate,
   ConsentRecord,
@@ -43,6 +44,8 @@ export interface StoredSession {
   corrections: Correction[];
   bookmarks?: ReviewBookmark[];
   reviewClips?: ReviewClip[];
+  /** Human-reviewed session-relative crosstalk/external-audio ranges. */
+  audioIssueAnnotations?: AudioIssueAnnotation[];
   cues?: CueEvent[];
   speakingWindows?: SpeakingWindowRecord[];
   /** Immutable model/stub transcript evidence. */

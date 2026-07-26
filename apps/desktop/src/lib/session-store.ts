@@ -1,6 +1,7 @@
 import type { StoredSession } from "./store";
 import {
   calibrationSchema,
+  audioIssueAnnotationSchema,
   correctionSchema,
   cueEventSchema,
   featureVectorSchema,
@@ -23,6 +24,7 @@ const storedSessionSchema = z.object({
   corrections: z.array(correctionSchema),
   bookmarks: z.array(reviewBookmarkSchema).optional(),
   reviewClips: z.array(reviewClipSchema).optional(),
+  audioIssueAnnotations: z.array(audioIssueAnnotationSchema).optional(),
   cues: z.array(cueEventSchema).optional(),
   speakingWindows: z.array(speakingWindowSchema).optional(),
   transcript: transcriptDocumentSchema.optional(),
@@ -197,6 +199,10 @@ export function mergeStoredSessions(
       corrections: longer(browser.corrections, native.corrections),
       bookmarks: optionalLonger(browser.bookmarks, native.bookmarks),
       reviewClips: optionalLonger(browser.reviewClips, native.reviewClips),
+      audioIssueAnnotations: optionalLonger(
+        browser.audioIssueAnnotations,
+        native.audioIssueAnnotations,
+      ),
       cues: optionalLonger(browser.cues, native.cues),
       speakingWindows: optionalLonger(
         browser.speakingWindows,

@@ -554,6 +554,23 @@ export const reviewClipSchema = z
   });
 export type ReviewClip = z.infer<typeof reviewClipSchema>;
 
+export const audioIssueAnnotationSchema = z
+  .object({
+    id: z.string().min(1),
+    sessionId: z.string().min(1),
+    /** Session-relative range reviewed by a human. */
+    startUs: z.number().int().nonnegative(),
+    endUs: z.number().int().positive(),
+    kind: z.enum(["crosstalk", "external_audio"]),
+    note: z.string().min(1).max(1000).optional(),
+    createdAt: z.string().datetime(),
+  })
+  .refine((annotation) => annotation.endUs > annotation.startUs, {
+    message: "Audio issue endUs must be after startUs",
+    path: ["endUs"],
+  });
+export type AudioIssueAnnotation = z.infer<typeof audioIssueAnnotationSchema>;
+
 export const transcriptWordSchema = z
   .object({
     text: z.string().min(1),

@@ -80,4 +80,31 @@ describe("segment proposals", () => {
 
     expect(proposals).toHaveLength(0);
   });
+
+  it("rejects proposals overlapping human-reviewed crosstalk", () => {
+    const proposals = proposeSegments({
+      sessionId: "seg-crosstalk",
+      durationUs: 10_000_000,
+      sentences: [
+        {
+          index: 0,
+          startUs: 1_000_000,
+          endUs: 6_000_000,
+          text: "A complete but contaminated sentence.",
+        },
+      ],
+      audioIssueAnnotations: [
+        {
+          id: "audio-issue-1",
+          sessionId: "seg-crosstalk",
+          startUs: 2_000_000,
+          endUs: 3_000_000,
+          kind: "crosstalk",
+          createdAt: "2026-07-26T12:00:00.000Z",
+        },
+      ],
+    });
+
+    expect(proposals).toHaveLength(0);
+  });
 });

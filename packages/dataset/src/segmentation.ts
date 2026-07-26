@@ -1,4 +1,8 @@
-import type { GazeEvent, GazePrediction } from "../../contracts/src";
+import type {
+  AudioIssueAnnotation,
+  GazeEvent,
+  GazePrediction,
+} from "../../contracts/src";
 import type { SentenceBoundary, SpeakingWindow } from "../../coaching/src/speaking";
 import type { SpeechStructureEvent } from "./speech-structure";
 
@@ -21,6 +25,7 @@ export interface SegmentProposalInput {
   predictions?: GazePrediction[];
   events?: GazeEvent[];
   speechStructureEvents?: SpeechStructureEvent[];
+  audioIssueAnnotations?: AudioIssueAnnotation[];
 }
 
 function bandForDuration(durationUs: number): SegmentProposal["band"] {
@@ -111,6 +116,17 @@ export function proposeSegments(input: SegmentProposalInput): SegmentProposal[] 
           (event) =>
             event.startUs < proposal.endUs &&
             event.endUs > proposal.startUs,
+        ),
+    );
+  }
+
+  if (input.audioIssueAnnotations?.length) {
+    filtered = filtered.filter(
+      (proposal) =>
+        !input.audioIssueAnnotations!.some(
+          (annotation) =>
+            annotation.startUs < proposal.endUs &&
+            annotation.endUs > proposal.startUs,
         ),
     );
   }

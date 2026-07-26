@@ -1,4 +1,5 @@
 import type {
+  AudioIssueAnnotation,
   CueEvent,
   DrillDefinition,
   GazeEvent,
@@ -49,6 +50,7 @@ export interface ReviewTimelineInput {
   sentences?: SentenceBoundary[];
   bookmarks?: ReviewBookmark[];
   reviewClips?: ReviewClip[];
+  audioIssueAnnotations?: AudioIssueAnnotation[];
   /** Countdown / app pause intervals to exclude from metrics. */
   exclusions?: MetricExclusionWindow[];
 }
@@ -176,6 +178,17 @@ export function reviewClipSegments(
   }));
 }
 
+export function audioIssueSegments(
+  annotations: AudioIssueAnnotation[] | undefined,
+): TimelineSegment[] {
+  return (annotations ?? []).map((annotation) => ({
+    startUs: annotation.startUs,
+    endUs: annotation.endUs,
+    label: annotation.note ?? annotation.kind.replaceAll("_", " "),
+    kind: annotation.kind,
+  }));
+}
+
 /** Multi-lane review timeline used by the Review UI. */
 export function buildReviewLanes(input: ReviewTimelineInput): ReviewLane[] {
   const durationUs = clampDuration(input.durationUs);
@@ -230,6 +243,12 @@ export function buildReviewLanes(input: ReviewTimelineInput): ReviewLane[] {
       id: "clips",
       name: "Review clips",
       segments: reviewClipSegments(input.reviewClips),
+      markers: [],
+    },
+    {
+      id: "audio-issues",
+      name: "Crosstalk / external audio",
+      segments: audioIssueSegments(input.audioIssueAnnotations),
       markers: [],
     },
   ];
@@ -364,6 +383,7 @@ export interface SessionReport {
     bookmarkCount: number;
     sentenceCount: number;
     reviewClipCount: number;
+    audioIssueCount: number;
     contactRatio?: number;
     drillId?: string;
     feedbackIntensity?: string;
@@ -384,6 +404,7 @@ export function buildSessionReport(args: {
   sentences?: SentenceBoundary[];
   bookmarks?: ReviewBookmark[];
   reviewClips?: ReviewClip[];
+  audioIssueAnnotations?: AudioIssueAnnotation[];
   exclusions?: MetricExclusionWindow[];
 }): SessionReport {
   const lanes = buildReviewLanes({
@@ -397,6 +418,7 @@ export function buildSessionReport(args: {
     sentences: args.sentences,
     bookmarks: args.bookmarks,
     reviewClips: args.reviewClips,
+    audioIssueAnnotations: args.audioIssueAnnotations,
     exclusions: args.exclusions,
   });
   const scored = predictionsForCoachingMetrics(args.predictions, {
@@ -412,6 +434,7 @@ export function buildSessionReport(args: {
   const bookmarkCount = args.bookmarks?.length ?? 0;
   const sentenceCount = args.sentences?.length ?? 0;
   const reviewClipCount = args.reviewClips?.length ?? 0;
+  const audioIssueCount = args.audioIssueAnnotations?.length ?? 0;
   const markdown = [
     `# Session report`,
     ``,
@@ -429,6 +452,7 @@ export function buildSessionReport(args: {
     `- Bookmarks: ${bookmarkCount}`,
     `- Sentences: ${sentenceCount}`,
     `- Review clips: ${reviewClipCount}`,
+    `- Crosstalk / external-audio ranges: ${audioIssueCount}`,
     ``,
     `## Lanes`,
     ...lanes.map(
@@ -450,6 +474,7 @@ export function buildSessionReport(args: {
       bookmarkCount,
       sentenceCount,
       reviewClipCount,
+      audioIssueCount,
       contactRatio,
       drillId: args.manifest.coaching?.drillId,
       feedbackIntensity: args.manifest.coaching?.feedbackIntensity,

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
+  AudioIssueAnnotation,
   Calibration,
   CalibrationTarget,
   CaptureProfile,
@@ -2412,6 +2413,13 @@ function Review({
     note: "",
   });
   const [clipError, setClipError] = useState<string>();
+  const [audioIssueDraft, setAudioIssueDraft] = useState({
+    start: "0",
+    end: "1",
+    kind: "crosstalk" as AudioIssueAnnotation["kind"],
+    note: "",
+  });
+  const [audioIssueError, setAudioIssueError] = useState<string>();
   const playbackRef = useRef<HTMLVideoElement>(null);
   const selected = sessions.find((session) => session.manifest.id === selectedId) ?? sessions[0];
   const effectiveTranscript =
@@ -2516,6 +2524,7 @@ function Review({
             sentences: effectiveTranscript?.sentences,
             bookmarks: selected.bookmarks,
             reviewClips: selected.reviewClips,
+            audioIssueAnnotations: selected.audioIssueAnnotations,
           })
         : [],
     [
@@ -2542,6 +2551,13 @@ function Review({
     setTranscriptNotice(undefined);
     setClipDraft({ start: "0", end: "1", note: "" });
     setClipError(undefined);
+    setAudioIssueDraft({
+      start: "0",
+      end: "1",
+      kind: "crosstalk",
+      note: "",
+    });
+    setAudioIssueError(undefined);
   }, [selected?.manifest.id]);
 
   const addCorrection = async () => {
@@ -2693,6 +2709,7 @@ function Review({
       speakingWindows: selected.speakingWindows ?? [],
       bookmarks: selected.bookmarks ?? [],
       reviewClips: selected.reviewClips ?? [],
+      audioIssueAnnotations: selected.audioIssueAnnotations ?? [],
       transcript: selected.transcript,
       correctedTranscript: selected.correctedTranscript,
       transcriptRevisions: selected.transcriptRevisions ?? [],
@@ -2712,6 +2729,7 @@ function Review({
       sentences: effectiveTranscript?.sentences,
       bookmarks: selected.bookmarks,
       reviewClips: selected.reviewClips,
+      audioIssueAnnotations: selected.audioIssueAnnotations,
       originUs: reviewOriginUs,
       durationUs: timelineDurationUs || 1,
     });
@@ -3087,6 +3105,84 @@ function Review({
     } catch (cause) {
       setClipError(
         `Review clip could not be deleted: ${
+          cause instanceof Error ? cause.message : String(cause)
+        }`,
+      );
+    }
+  };
+
+  const addAudioIssueAnnotation = async () => {
+    if (!selected) return;
+    const startSeconds = Number(audioIssueDraft.start);
+    const endSeconds = Number(audioIssueDraft.end);
+    const availableSeconds = timelineDurationUs / 1_000_000;
+    if (
+      !Number.isFinite(startSeconds) ||
+      !Number.isFinite(endSeconds) ||
+      startSeconds < 0 ||
+      endSeconds <= startSeconds
+    ) {
+      setAudioIssueError(
+        "Enter a non-negative start and an end point after it.",
+      );
+      return;
+    }
+    if (availableSeconds <= 0 || endSeconds > availableSeconds + 0.05) {
+      setAudioIssueError(
+        `The audio issue must end within the ${availableSeconds.toFixed(2)}-second session.`,
+      );
+      return;
+    }
+    const annotation: AudioIssueAnnotation = {
+      id: crypto.randomUUID(),
+      sessionId: selected.manifest.id,
+      startUs: Math.round(startSeconds * 1_000_000),
+      endUs: Math.round(endSeconds * 1_000_000),
+      kind: audioIssueDraft.kind,
+      note: audioIssueDraft.note.trim() || undefined,
+      createdAt: new Date().toISOString(),
+    };
+    const updated: StoredSession = {
+      ...selected,
+      audioIssueAnnotations: [
+        ...(selected.audioIssueAnnotations ?? []),
+        annotation,
+      ],
+    };
+    try {
+      await store.sessions.put(updated);
+      onUpdated(updated);
+      setAudioIssueDraft({
+        start: "0",
+        end: "1",
+        kind: "crosstalk",
+        note: "",
+      });
+      setAudioIssueError(undefined);
+    } catch (cause) {
+      setAudioIssueError(
+        `Audio issue could not be saved: ${
+          cause instanceof Error ? cause.message : String(cause)
+        }`,
+      );
+    }
+  };
+
+  const removeAudioIssueAnnotation = async (annotationId: string) => {
+    if (!selected) return;
+    const updated: StoredSession = {
+      ...selected,
+      audioIssueAnnotations: (selected.audioIssueAnnotations ?? []).filter(
+        (annotation) => annotation.id !== annotationId,
+      ),
+    };
+    try {
+      await store.sessions.put(updated);
+      onUpdated(updated);
+      setAudioIssueError(undefined);
+    } catch (cause) {
+      setAudioIssueError(
+        `Audio issue could not be deleted: ${
           cause instanceof Error ? cause.message : String(cause)
         }`,
       );
@@ -3597,6 +3693,129 @@ function Review({
                 <p className="muted">No review clips selected.</p>
               )}
               {clipError && <p className="tracking-warning">{clipError}</p>}
+            </div>
+            <div className="panel audio-issue-panel">
+              <h2>Crosstalk and external audio</h2>
+              <p className="muted">
+                Mark reviewed contamination ranges. These annotations are
+                session-relative, appear on the timeline, and exclude
+                overlapping automatic clean-segment proposals.
+              </p>
+              <div className="correction-form">
+                <label>
+                  Start (s)
+                  <input
+                    value={audioIssueDraft.start}
+                    onChange={(event) =>
+                      setAudioIssueDraft({
+                        ...audioIssueDraft,
+                        start: event.target.value,
+                      })
+                    }
+                  />
+                </label>
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={() =>
+                    setAudioIssueDraft({
+                      ...audioIssueDraft,
+                      start: playbackTime.toFixed(2),
+                    })
+                  }
+                >
+                  Set start
+                </button>
+                <label>
+                  End (s)
+                  <input
+                    value={audioIssueDraft.end}
+                    onChange={(event) =>
+                      setAudioIssueDraft({
+                        ...audioIssueDraft,
+                        end: event.target.value,
+                      })
+                    }
+                  />
+                </label>
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={() =>
+                    setAudioIssueDraft({
+                      ...audioIssueDraft,
+                      end: playbackTime.toFixed(2),
+                    })
+                  }
+                >
+                  Set end
+                </button>
+                <label>
+                  Type
+                  <select
+                    value={audioIssueDraft.kind}
+                    onChange={(event) =>
+                      setAudioIssueDraft({
+                        ...audioIssueDraft,
+                        kind: event.target
+                          .value as AudioIssueAnnotation["kind"],
+                      })
+                    }
+                  >
+                    <option value="crosstalk">Crosstalk</option>
+                    <option value="external_audio">External audio</option>
+                  </select>
+                </label>
+                <label>
+                  Note
+                  <input
+                    value={audioIssueDraft.note}
+                    maxLength={1000}
+                    placeholder="Optional source or context"
+                    onChange={(event) =>
+                      setAudioIssueDraft({
+                        ...audioIssueDraft,
+                        note: event.target.value,
+                      })
+                    }
+                  />
+                </label>
+                <button
+                  type="button"
+                  onClick={() => void addAudioIssueAnnotation()}
+                >
+                  Save audio issue
+                </button>
+              </div>
+              {(selected.audioIssueAnnotations ?? []).map((annotation) => (
+                <div className="cue-rating-row" key={annotation.id}>
+                  <button
+                    type="button"
+                    className="text-button"
+                    onClick={() => seekToTimelineUs(annotation.startUs)}
+                  >
+                    {(annotation.startUs / 1_000_000).toFixed(2)}–
+                    {(annotation.endUs / 1_000_000).toFixed(2)}s ·{" "}
+                    {annotation.kind.replaceAll("_", " ")}
+                    {annotation.note ? ` · ${annotation.note}` : ""}
+                  </button>
+                  <button
+                    type="button"
+                    className="secondary"
+                    onClick={() =>
+                      void removeAudioIssueAnnotation(annotation.id)
+                    }
+                  >
+                    Delete
+                  </button>
+                </div>
+              ))}
+              {(selected.audioIssueAnnotations?.length ?? 0) === 0 && (
+                <p className="muted">No reviewed audio issues marked.</p>
+              )}
+              {audioIssueError && (
+                <p className="tracking-warning">{audioIssueError}</p>
+              )}
             </div>
             {(selected.cues?.length ?? 0) > 0 && (
               <div className="panel cue-rating-panel">
