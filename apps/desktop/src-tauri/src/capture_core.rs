@@ -5,9 +5,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::fs::{self, File};
-use std::io::{BufRead, BufReader, Read};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 use std::time::{Duration, Instant};
 use tracing::{info, warn};
 
@@ -155,8 +156,8 @@ fn repo_root_candidates() -> Vec<PathBuf> {
     let mut roots = Vec::new();
     if let Ok(manifest) = std::env::var("CARGO_MANIFEST_DIR") {
         // apps/desktop/src-tauri → repo root
-        roots.push(PathBuf::from(manifest).join("../.."));
-        roots.push(PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap()).join("../../.."));
+        roots.push(PathBuf::from(&manifest).join("../.."));
+        roots.push(PathBuf::from(&manifest)); // src-tauri itself (binaries/)
     }
     // cwd when running from repo root or src-tauri
     roots.push(PathBuf::from("."));
@@ -165,7 +166,24 @@ fn repo_root_candidates() -> Vec<PathBuf> {
     roots
 }
 
-fn resolve_capture_core_binary() -> Result<PathBuf, String> {
+fn sidecar_name_candidates() -> Vec<String> {
+    let mut names = vec!["capture-core".into()];
+    // Prefer the compile-time OS/arch triple used by Tauri externalBin naming.
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    names.push("capture-core-aarch64-apple-darwin".into());
+    #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
+    names.push("capture-core-x86_64-apple-darwin".into());
+    names.push("capture-core-aarch64-apple-darwin".into());
+    names.push("capture-core-x86_64-apple-darwin".into());
+    names.push("capture-core-universal-apple-darwin".into());
+    if let Ok(target) = std::env::var("TARGET") {
+        names.insert(0, format!("capture-core-{target}"));
+    }
+    names
+}
+
+/// Resolve capture-core binary: env override → next to app exe / sidecar → repo build outputs.
+pub fn resolve_capture_core_binary() -> Result<PathBuf, String> {
     if let Ok(explicit) = std::env::var("CAPTURE_CORE_BIN") {
         let path = PathBuf::from(explicit);
         if path.is_file() {
@@ -174,25 +192,48 @@ fn resolve_capture_core_binary() -> Result<PathBuf, String> {
         return Err(format!("CAPTURE_CORE_BIN not a file: {}", path.display()));
     }
 
-    let relative_bins = [
-        "native/capture-macos/.build/arm64-apple-macosx/debug/capture-core",
-        "native/capture-macos/.build/debug/capture-core",
-        "native/capture-macos/.build/x86_64-apple-macosx/debug/capture-core",
-        "native/capture-macos/.build/arm64-apple-macosx/release/capture-core",
-        "native/capture-macos/.build/release/capture-core",
-    ];
+    let names = sidecar_name_candidates();
+    let mut search_dirs: Vec<PathBuf> = Vec::new();
 
-    for root in repo_root_candidates() {
-        for rel in relative_bins {
-            let candidate = root.join(rel);
-            if candidate.is_file() {
-                return Ok(candidate.canonicalize().unwrap_or(candidate));
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            // Tauri externalBin lands beside the main binary (…/Contents/MacOS/).
+            search_dirs.push(dir.to_path_buf());
+            // Some layouts keep helpers under Resources.
+            if let Some(contents) = dir.parent() {
+                search_dirs.push(contents.join("Resources"));
+                search_dirs.push(contents.join("MacOS"));
             }
         }
     }
 
+    for root in repo_root_candidates() {
+        search_dirs.push(root.join("binaries"));
+        search_dirs.push(root.join("apps/desktop/src-tauri/binaries"));
+        search_dirs.push(root.join("native/capture-macos/.build/arm64-apple-macosx/debug"));
+        search_dirs.push(root.join("native/capture-macos/.build/debug"));
+        search_dirs.push(root.join("native/capture-macos/.build/x86_64-apple-macosx/debug"));
+        search_dirs.push(root.join("native/capture-macos/.build/arm64-apple-macosx/release"));
+        search_dirs.push(root.join("native/capture-macos/.build/release"));
+        search_dirs.push(root.join("native/capture-macos/.build/CaptureCore.app/Contents/MacOS"));
+    }
+
+    for dir in search_dirs {
+        for name in &names {
+            let candidate = dir.join(name);
+            if candidate.is_file() {
+                return Ok(candidate.canonicalize().unwrap_or(candidate));
+            }
+        }
+        // Unpackaged Swift product is just "capture-core"
+        let plain = dir.join("capture-core");
+        if plain.is_file() {
+            return Ok(plain.canonicalize().unwrap_or(plain));
+        }
+    }
+
     Err(
-        "capture-core binary not found. Build with: swift build --package-path native/capture-macos (or set CAPTURE_CORE_BIN)"
+        "capture-core binary not found. Run: sh scripts/dev/prepare-capture-core-sidecar.sh (or set CAPTURE_CORE_BIN)"
             .into(),
     )
 }
@@ -215,8 +256,20 @@ pub fn list_capture_devices() -> Result<Value, String> {
     serde_json::from_str(stdout.trim()).map_err(|e| format!("parse list-devices JSON: {e}"))
 }
 
+/// Optional hooks while a record is in flight (UI progress + cooperative stop).
+pub struct CaptureRunHooks {
+    /// Called on the supervisor thread for each stdout protocol event.
+    pub on_event: Option<Box<dyn FnMut(Value) + Send>>,
+    /// When a message arrives, write stdin `{"type":"stop"}` (keeps stdin open until then).
+    pub stop_rx: Option<Receiver<()>>,
+}
+
 /// Run capture-core record to completion (dry-run or live). Collects stdout JSONL events.
-pub fn run_capture_record(request: CaptureRecordRequest) -> Result<CaptureRunResult, String> {
+/// Optional hooks support live UI events and cooperative stdin stop.
+pub fn run_capture_record_with_hooks(
+    request: CaptureRecordRequest,
+    mut hooks: CaptureRunHooks,
+) -> Result<CaptureRunResult, String> {
     let binary = resolve_capture_core_binary()?;
     let session_root = PathBuf::from(&request.session_root);
     fs::create_dir_all(session_root.join("master").join("segments"))
@@ -254,12 +307,11 @@ pub fn run_capture_record(request: CaptureRecordRequest) -> Result<CaptureRunRes
 
     let stdout = child.stdout.take().ok_or("missing stdout")?;
     let stderr = child.stderr.take().ok_or("missing stderr")?;
-    // Drop stdin so EOF → Swift treats as stop if still running without maxDuration.
-    drop(child.stdin.take());
+    let mut stdin = child.stdin.take();
 
+    let (event_tx, event_rx): (Sender<Value>, Receiver<Value>) = mpsc::channel();
     let stdout_thread = std::thread::spawn(move || {
         let reader = BufReader::new(stdout);
-        let mut events = Vec::new();
         for line in reader.lines() {
             let Ok(line) = line else { break };
             let line = line.trim().to_string();
@@ -267,10 +319,11 @@ pub fn run_capture_record(request: CaptureRecordRequest) -> Result<CaptureRunRes
                 continue;
             }
             if let Ok(value) = serde_json::from_str::<Value>(&line) {
-                events.push(value);
+                if event_tx.send(value).is_err() {
+                    break;
+                }
             }
         }
-        events
     });
     let stderr_thread = std::thread::spawn(move || {
         let mut reader = BufReader::new(stderr);
@@ -279,15 +332,60 @@ pub fn run_capture_record(request: CaptureRecordRequest) -> Result<CaptureRunRes
         buf
     });
 
+    let mut events: Vec<Value> = Vec::new();
+    let mut stop_sent = false;
+
+    let drain_events = |events: &mut Vec<Value>,
+                        event_rx: &Receiver<Value>,
+                        on_event: &mut Option<Box<dyn FnMut(Value) + Send>>| {
+        loop {
+            match event_rx.try_recv() {
+                Ok(value) => {
+                    if let Some(cb) = on_event.as_mut() {
+                        cb(value.clone());
+                    }
+                    events.push(value);
+                }
+                Err(TryRecvError::Empty) => break,
+                Err(TryRecvError::Disconnected) => break,
+            }
+        }
+    };
+
     loop {
+        drain_events(&mut events, &event_rx, &mut hooks.on_event);
+
+        if !stop_sent {
+            if let Some(rx) = hooks.stop_rx.as_ref() {
+                if rx.try_recv().is_ok() {
+                    if let Some(ref mut sin) = stdin {
+                        let _ = writeln!(sin, r#"{{"type":"stop"}}"#);
+                        let _ = sin.flush();
+                        info!("capture_core_stop_sent");
+                    }
+                    stop_sent = true;
+                }
+            }
+        }
+
         if started.elapsed() > timeout {
             let _ = child.kill();
             let _ = child.wait();
+            let _ = stdout_thread.join();
             return Err("capture-core timed out".into());
         }
         match child.try_wait() {
             Ok(Some(status)) => {
-                let events = stdout_thread.join().unwrap_or_default();
+                // Drop stdin so any remaining reader unblocks; drain leftover events.
+                drop(stdin);
+                let _ = stdout_thread.join();
+                drain_events(&mut events, &event_rx, &mut hooks.on_event);
+                while let Ok(value) = event_rx.try_recv() {
+                    if let Some(cb) = hooks.on_event.as_mut() {
+                        cb(value.clone());
+                    }
+                    events.push(value);
+                }
                 let err_log = stderr_thread.join().unwrap_or_default();
                 if !err_log.trim().is_empty() {
                     warn!(%err_log, "capture_core_stderr");
@@ -321,7 +419,7 @@ pub fn run_capture_record(request: CaptureRecordRequest) -> Result<CaptureRunRes
                     seal_path,
                 });
             }
-            Ok(None) => std::thread::sleep(Duration::from_millis(50)),
+            Ok(None) => std::thread::sleep(Duration::from_millis(40)),
             Err(e) => return Err(format!("wait capture-core: {e}")),
         }
     }
@@ -538,7 +636,14 @@ mod tests {
             dry_run: Some(true),
             prefer_pcm_audio: None,
         };
-        let result = run_capture_record(request).expect("dry-run should succeed");
+        let result = run_capture_record_with_hooks(
+            request,
+            CaptureRunHooks {
+                on_event: None,
+                stop_rx: None,
+            },
+        )
+        .expect("dry-run should succeed");
         assert_eq!(result.exit_code, 0);
         assert!(result.dry_run);
         assert!(!result.events.is_empty());

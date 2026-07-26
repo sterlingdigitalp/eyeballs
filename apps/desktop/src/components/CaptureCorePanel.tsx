@@ -6,12 +6,17 @@ import {
   type CaptureProfile,
 } from "../../../../packages/contracts/src";
 import {
+  captureCoreBinaryPath,
   captureCoreDryRun,
   captureCoreLiveRecord,
   captureCoreReconcileProfile,
   captureCoreScanOrphans,
   captureCoreSessionsRoot,
+  captureCoreStop,
   isCaptureCoreHostAvailable,
+  listenCaptureCoreEvents,
+  summarizeCaptureCoreEvent,
+  type CaptureCoreProtocolEvent,
 } from "../lib/capture-core";
 import { logEvent } from "../lib/logging";
 
@@ -34,19 +39,24 @@ export function CaptureCorePanel({ profile, onReleaseMedia, onProfilePatched }: 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   const [sessionsRoot, setSessionsRoot] = useState<string>();
+  const [binaryPath, setBinaryPath] = useState<string>();
   const [orphans, setOrphans] = useState<OrphanRow[]>([]);
   const [lastRun, setLastRun] = useState<CaptureCoreRunResult>();
   const [bindNote, setBindNote] = useState<string>();
   const [liveSeconds, setLiveSeconds] = useState(15);
+  const [progress, setProgress] = useState<string>();
+  const [liveEvent, setLiveEvent] = useState<CaptureCoreProtocolEvent>();
 
   const refreshOrphans = useCallback(async () => {
     if (!host) return;
     try {
-      const [root, scan] = await Promise.all([
+      const [root, scan, binary] = await Promise.all([
         captureCoreSessionsRoot(),
         captureCoreScanOrphans(),
+        captureCoreBinaryPath().catch(() => "not found"),
       ]);
       setSessionsRoot(root);
+      setBinaryPath(binary);
       setOrphans(
         (scan.orphans as OrphanRow[]).map((row) => ({
           sessionId: typeof row.sessionId === "string" ? row.sessionId : undefined,
@@ -65,6 +75,23 @@ export function CaptureCorePanel({ profile, onReleaseMedia, onProfilePatched }: 
     void refreshOrphans();
   }, [refreshOrphans]);
 
+  useEffect(() => {
+    if (!host) return;
+    let active = true;
+    let unlisten: (() => void) | undefined;
+    void listenCaptureCoreEvents((event) => {
+      if (!active) return;
+      setLiveEvent(event);
+      setProgress(summarizeCaptureCoreEvent(event));
+    }).then((fn) => {
+      unlisten = fn;
+    });
+    return () => {
+      active = false;
+      unlisten?.();
+    };
+  }, [host]);
+
   const runWith = async (
     kind: "dry" | "live",
     action: () => Promise<CaptureCoreRunResult>,
@@ -76,10 +103,19 @@ export function CaptureCorePanel({ profile, onReleaseMedia, onProfilePatched }: 
     setBusy(true);
     setError(undefined);
     setBindNote(undefined);
+    setProgress(kind === "dry" ? "Starting dry-run…" : "Starting live record…");
+    setLiveEvent(undefined);
     onReleaseMedia();
     try {
       const result = await action();
       setLastRun(result);
+      setProgress(
+        result.exitCode === 0
+          ? result.dryRun
+            ? "Dry-run complete"
+            : "Live take complete"
+          : `Finished with exit ${result.exitCode}`,
+      );
       void logEvent(kind === "dry" ? "capture_core_dry_run_complete" : "capture_core_live_complete", {
         fields: {
           exitCode: result.exitCode,
@@ -95,6 +131,7 @@ export function CaptureCorePanel({ profile, onReleaseMedia, onProfilePatched }: 
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : String(cause);
       setError(message);
+      setProgress(undefined);
       void logEvent(kind === "dry" ? "capture_core_dry_run_failed" : "capture_core_live_failed", {
         level: "error",
         fields: { message },
@@ -128,6 +165,15 @@ export function CaptureCorePanel({ profile, onReleaseMedia, onProfilePatched }: 
     );
   };
 
+  const requestStop = async () => {
+    try {
+      const result = await captureCoreStop();
+      setProgress(result.sent ? "Stop requested…" : "No active recording to stop");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    }
+  };
+
   const bindDevices = async () => {
     if (!profile) {
       setError("Choose a capture profile on Setup first.");
@@ -155,6 +201,7 @@ export function CaptureCorePanel({ profile, onReleaseMedia, onProfilePatched }: 
   const bindings = profile?.deviceBindings;
   const avReady = Boolean(bindings?.avFoundationCameraId);
   const success = lastRun && lastRun.exitCode === 0;
+  const payload = liveEvent?.payload;
 
   return (
     <section className="screen dataset-screen">
@@ -162,8 +209,8 @@ export function CaptureCorePanel({ profile, onReleaseMedia, onProfilePatched }: 
         <p className="eyebrow">Dataset</p>
         <h1>CaptureCore masters</h1>
         <p className="lede">
-          Practice camera is released before every take. Dry-run seals software layout; live
-          record uses Brio/Yeti (or bound AV devices) with short segments for recovery.
+          Practice camera is released before every take. Live progress streams from the sidecar;
+          stop ends the open segment cleanly when a record is running.
         </p>
       </div>
 
@@ -216,6 +263,13 @@ export function CaptureCorePanel({ profile, onReleaseMedia, onProfilePatched }: 
               {busy ? "Recording…" : `Live record ${Math.min(120, Math.max(5, liveSeconds))}s`}
             </button>
             <button
+              className="stop"
+              disabled={!host || !busy}
+              onClick={() => void requestStop()}
+            >
+              Stop
+            </button>
+            <button
               className="secondary"
               disabled={!host || busy || !profile}
               onClick={runDryRun}
@@ -237,6 +291,22 @@ export function CaptureCorePanel({ profile, onReleaseMedia, onProfilePatched }: 
               Scan orphans
             </button>
           </div>
+
+          {(busy || progress) && (
+            <div className={`dataset-progress ${busy ? "live" : ""}`} role="status" aria-live="polite">
+              <strong>{busy ? "In progress" : "Last status"}</strong>
+              <span>{progress ?? "…"}</span>
+              {payload && typeof payload.videoFrames === "number" && (
+                <span className="muted">
+                  frames {payload.videoFrames as number}
+                  {typeof payload.segmentIndex === "number"
+                    ? ` · segment ${payload.segmentIndex as number}`
+                    : ""}
+                </span>
+              )}
+            </div>
+          )}
+
           {bindNote && <p className="format">{bindNote}</p>}
           {error && (
             <div className="notice warning" role="alert">
@@ -244,7 +314,7 @@ export function CaptureCorePanel({ profile, onReleaseMedia, onProfilePatched }: 
               <span>{error}</span>
             </div>
           )}
-          {success && (
+          {success && !busy && (
             <div className="notice success" role="status">
               <strong>{lastRun.dryRun ? "Dry-run sealed" : "Live take sealed"}</strong>
               <span>
@@ -279,6 +349,7 @@ export function CaptureCorePanel({ profile, onReleaseMedia, onProfilePatched }: 
           <details className="dataset-details">
             <summary>Developer details</summary>
             <p className="muted">Sessions root: {sessionsRoot ?? "—"}</p>
+            <p className="muted">CaptureCore binary: {binaryPath ?? "—"}</p>
             {lastRun && (
               <p className="muted">
                 Session: {lastRun.sessionRoot}

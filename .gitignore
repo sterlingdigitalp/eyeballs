@@ -1,6 +1,9 @@
 node_modules/
 dist/
 apps/desktop/src-tauri/target/
+apps/desktop/src-tauri/binaries/capture-core
+apps/desktop/src-tauri/binaries/capture-core-*
+!apps/desktop/src-tauri/binaries/README.md
 native/capture-macos/.build/
 apps/desktop/public/mediapipe/
 apps/desktop/public/models/*.task

@@ -5,6 +5,7 @@ import {
   captureProfileSchema,
   type CaptureProfile,
 } from "../../../../packages/contracts/src";
+import { summarizeCaptureCoreEvent } from "./capture-core";
 
 const profile = (): CaptureProfile =>
   captureProfileSchema.parse({
@@ -63,5 +64,19 @@ describe("buildCaptureCoreRecordRequest", () => {
       cameraUniqueId: "AV-BRIO",
       microphoneUniqueId: "AV-YETI",
     });
+  });
+});
+
+describe("summarizeCaptureCoreEvent", () => {
+  it("summarizes health and state events", () => {
+    expect(
+      summarizeCaptureCoreEvent({ type: "state", payload: { state: "recording" } }),
+    ).toBe("State: recording");
+    expect(
+      summarizeCaptureCoreEvent({
+        type: "health",
+        payload: { videoFrames: 12, segmentIndex: 0 },
+      }),
+    ).toContain("12 frames");
   });
 });

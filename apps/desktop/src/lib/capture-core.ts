@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import {
   buildCaptureCoreRecordRequest,
   CAPTURE_CORE_DEFAULT_SEGMENT_SEC,
@@ -17,6 +18,14 @@ const isTauri = () => typeof window !== "undefined" && "__TAURI_INTERNALS__" in 
 export function isCaptureCoreHostAvailable(): boolean {
   return isTauri();
 }
+
+export type CaptureCoreProtocolEvent = {
+  type?: string;
+  payload?: Record<string, unknown>;
+  sessionId?: string;
+  sequence?: number;
+  [key: string]: unknown;
+};
 
 export async function captureCoreSessionsRoot(): Promise<string> {
   if (!isTauri()) throw new Error("captureCoreSessionsRoot requires the Tauri host");
@@ -39,6 +48,29 @@ export async function captureCoreRecord(
   }
   const raw = await invoke<unknown>("capture_core_record", { request });
   return captureCoreRunResultSchema.parse(raw);
+}
+
+/** Cooperative stop of the in-flight record (stdin JSONL). */
+export async function captureCoreStop(): Promise<{ sent: boolean; reason?: string }> {
+  if (!isTauri()) throw new Error("captureCoreStop requires the Tauri host");
+  return invoke("capture_core_stop");
+}
+
+export async function captureCoreBinaryPath(): Promise<string> {
+  if (!isTauri()) throw new Error("captureCoreBinaryPath requires the Tauri host");
+  return invoke<string>("capture_core_binary_path");
+}
+
+/** Subscribe to live CaptureCore protocol events while a record runs. */
+export async function listenCaptureCoreEvents(
+  onEvent: (event: CaptureCoreProtocolEvent) => void,
+): Promise<UnlistenFn> {
+  if (!isTauri()) {
+    return () => undefined;
+  }
+  return listen<CaptureCoreProtocolEvent>("capture-core-event", (event) => {
+    onEvent(event.payload);
+  });
 }
 
 export async function captureCoreHashFile(path: string): Promise<CaptureCoreSegmentHash> {
@@ -108,7 +140,6 @@ export async function captureCoreDryRun(
     ...input,
     dryRun: true,
     maxDurationSec: input.maxDurationSec ?? 1,
-    // Short segments so dry-run can exercise multi-segment protocol in ~1s.
     segmentDurationSec: input.segmentDurationSec ?? 0.4,
   });
 }
@@ -134,6 +165,31 @@ export async function captureCoreReconcileProfile(
 ): Promise<CaptureProfile> {
   const inventory = await captureCoreListDevices();
   return reconcileDeviceBindings(profile, inventory);
+}
+
+/** Human-readable line from a protocol event for Dataset progress. */
+export function summarizeCaptureCoreEvent(event: CaptureCoreProtocolEvent): string {
+  const type = typeof event.type === "string" ? event.type : "event";
+  const payload = event.payload ?? {};
+  if (type === "state" && typeof payload.state === "string") {
+    return `State: ${payload.state}`;
+  }
+  if (type === "health") {
+    const frames = payload.videoFrames ?? payload.video_frames ?? "—";
+    const seg = payload.segmentIndex ?? payload.segment_index ?? "—";
+    return `Recording · segment ${seg} · ${frames} frames`;
+  }
+  if (type === "segment_finalized") {
+    const seg = payload.segmentIndex ?? payload.segment_index ?? "—";
+    return `Segment ${seg} finalized`;
+  }
+  if (type === "recording_finished") {
+    return "Recording finished";
+  }
+  if (type === "error") {
+    return "Error from CaptureCore";
+  }
+  return type;
 }
 
 export {

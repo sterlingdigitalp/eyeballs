@@ -134,10 +134,13 @@ Expect: `state starting → recording → segment_finalized → recording_finish
 | Prefer target fps in `activeFormat` selection | Logged negotiated WxH@fps |
 | PCM audio masters default (`preferPcmAudio`) | LPCM in CAF; AAC optional |
 | Dataset **Live record** + duration control | `CaptureCorePanel` |
+| Tauri `externalBin` + prepare script | `binaries/capture-core-<triple>` |
+| Live protocol events + Stop | `capture-core-event`, `capture_core_stop` |
+| Binary resolve (exe dir / sidecar / repo) | `resolve_capture_core_binary` |
 
 ## Next (Stage 2–4)
 
 1. ~~Human dual short take~~ **Done**. ~~Kill recovery~~ **Done** (partial files, no finish marker).  
 2. Re-verify live dual take after PCM + fps + fragment changes (short Terminal take).  
-3. Package capture-core as Tauri externalBin sidecar for release builds.  
+3. ~~Sidecar packaging wiring~~ **Done** (prepare script + externalBin; full release sign later).  
 4. Later: 1h soak + failure matrix before ADR-004 → Accepted.

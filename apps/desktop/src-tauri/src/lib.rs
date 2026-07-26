@@ -5,20 +5,23 @@ mod persistence;
 
 use capture_core::{
     ensure_under_sessions_root, hash_session_segments, list_capture_devices, prepare_session_dir,
-    run_capture_record, scan_orphan_sessions, sha256_file, CaptureRecordRequest, CaptureRunResult,
-    SegmentHash,
+    resolve_capture_core_binary, run_capture_record_with_hooks, scan_orphan_sessions, sha256_file,
+    CaptureRecordRequest, CaptureRunHooks, CaptureRunResult, SegmentHash,
 };
 use persistence::Database;
 use serde_json::Value;
 use std::path::PathBuf;
+use std::sync::mpsc::{self, Sender};
 use std::sync::Mutex;
-use tauri::{Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use tracing::{error, info, warn};
 
 struct AppState {
     database: Mutex<Database>,
     /// Application Support …/sessions — CaptureCore masters are confined here.
     sessions_dir: PathBuf,
+    /// Cooperative stop for the in-flight CaptureCore record (stdin `stop`).
+    capture_stop_tx: Mutex<Option<Sender<()>>>,
 }
 
 #[tauri::command]
@@ -69,11 +72,15 @@ fn health(state: State<'_, AppState>) -> Result<Value, String> {
         .database
         .lock()
         .map_err(|_| "Database lock was poisoned.")?;
+    let binary = resolve_capture_core_binary()
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|e| format!("missing: {e}"));
     Ok(serde_json::json!({
         "database": database.health().map_err(|error| error.to_string())?,
         "localOnly": true,
         "schemaVersion": 1,
         "sessionsDir": state.sessions_dir.display().to_string(),
+        "captureCoreBinary": binary,
     }))
 }
 
@@ -118,10 +125,11 @@ fn capture_core_prepare_session(
     }))
 }
 
-/// Run CaptureCore record (prefer dryRun: true until TCC-capable host).
+/// Run CaptureCore record. Emits `capture-core-event` for each protocol line.
 /// Session root must live under the app sessions directory.
 #[tauri::command]
 fn capture_core_record(
+    app: AppHandle,
     state: State<'_, AppState>,
     request: CaptureRecordRequest,
 ) -> Result<CaptureRunResult, String> {
@@ -129,7 +137,57 @@ fn capture_core_record(
         PathBuf::from(&request.session_root).as_path(),
         &state.sessions_dir,
     )?;
-    run_capture_record(request)
+
+    let (stop_tx, stop_rx) = mpsc::channel();
+    {
+        let mut slot = state
+            .capture_stop_tx
+            .lock()
+            .map_err(|_| "Capture stop lock was poisoned.".to_string())?;
+        if slot.is_some() {
+            return Err("A CaptureCore recording is already in progress.".into());
+        }
+        *slot = Some(stop_tx);
+    }
+
+    let app_for_events = app.clone();
+    let result = run_capture_record_with_hooks(
+        request,
+        CaptureRunHooks {
+            on_event: Some(Box::new(move |value| {
+                let _ = app_for_events.emit("capture-core-event", value);
+            })),
+            stop_rx: Some(stop_rx),
+        },
+    );
+
+    if let Ok(mut slot) = state.capture_stop_tx.lock() {
+        *slot = None;
+    }
+
+    result
+}
+
+/// Request graceful stop of the in-flight CaptureCore record (stdin JSONL).
+#[tauri::command]
+fn capture_core_stop(state: State<'_, AppState>) -> Result<Value, String> {
+    let slot = state
+        .capture_stop_tx
+        .lock()
+        .map_err(|_| "Capture stop lock was poisoned.".to_string())?;
+    match slot.as_ref() {
+        Some(tx) => {
+            let _ = tx.send(());
+            Ok(serde_json::json!({ "sent": true }))
+        }
+        None => Ok(serde_json::json!({ "sent": false, "reason": "no_active_recording" })),
+    }
+}
+
+/// Resolved capture-core binary path (for diagnostics).
+#[tauri::command]
+fn capture_core_binary_path() -> Result<String, String> {
+    Ok(resolve_capture_core_binary()?.display().to_string())
 }
 
 /// Stream SHA-256 for a single closed file path (must be under sessions root).
@@ -200,7 +258,6 @@ pub fn run() {
                 .try_init()
                 .ok();
             let database = Database::open(data_dir.join("presence.sqlite3"))?;
-            // Startup orphan scan (log only — UI can re-query).
             match scan_orphan_sessions(&sessions_dir) {
                 Ok(orphans) if !orphans.is_empty() => {
                     warn!(count = orphans.len(), "capture_core_orphans_at_startup");
@@ -208,9 +265,14 @@ pub fn run() {
                 Ok(_) => info!("capture_core_no_orphans_at_startup"),
                 Err(error) => warn!(%error, "capture_core_orphan_scan_failed"),
             }
+            match resolve_capture_core_binary() {
+                Ok(path) => info!(binary = %path.display(), "capture_core_binary_resolved"),
+                Err(error) => warn!(%error, "capture_core_binary_missing"),
+            }
             app.manage(AppState {
                 database: Mutex::new(database),
                 sessions_dir: sessions_dir.clone(),
+                capture_stop_tx: Mutex::new(None),
             });
             info!(sessions = %sessions_dir.display(), "application_initialized");
             Ok(())
@@ -224,6 +286,8 @@ pub fn run() {
             capture_core_sessions_root,
             capture_core_prepare_session,
             capture_core_record,
+            capture_core_stop,
+            capture_core_binary_path,
             capture_core_hash_file,
             capture_core_hash_segments,
             capture_core_scan_orphans,

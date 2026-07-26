@@ -20,9 +20,19 @@ sh scripts/dev/test-capture-core-dry-run.sh
 swift run --package-path native/capture-macos capture-core record --request <dryRun request.json>
 ```
 
-Tauri supervisor (Rust): `capture_core_record`, `capture_core_hash_file`,
-`capture_core_hash_segments`, `capture_core_scan_orphans`, `capture_core_list_devices`.
-Set `CAPTURE_CORE_BIN` to the built binary path if not discovered automatically.
+Tauri supervisor (Rust): `capture_core_record`, `capture_core_stop`,
+`capture_core_hash_file`, `capture_core_hash_segments`, `capture_core_scan_orphans`,
+`capture_core_list_devices`, `capture_core_binary_path`.
+
+Stage the sidecar for Tauri:
+
+```sh
+npm run prepare:capture-core
+# → apps/desktop/src-tauri/binaries/capture-core-<rustc-host-triple>
+```
+
+Set `CAPTURE_CORE_BIN` to override discovery. Live records emit `capture-core-event`
+on the app event bus; `capture_core_stop` writes stdin `{"type":"stop"}`.
 
 On-disk seals (orphan scan):
 - Swift writes `recording-finished.json` on clean stop / dry-run

@@ -144,6 +144,11 @@ input, select { background: #111e1a; border: 1px solid var(--line); border-radiu
 .dataset-actions { display: flex; flex-wrap: wrap; gap: 10px; margin: 8px 0 16px; }
 .dataset-duration { display: grid; gap: 6px; color: var(--muted); font-size: 12px; margin: 4px 0 14px; max-width: 220px; }
 .dataset-duration input { width: 100%; }
+.dataset-progress { display: grid; gap: 4px; margin: 4px 0 14px; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--line); background: #0c1714; font-size: 13px; }
+.dataset-progress.live { border-color: #3e715e; box-shadow: 0 0 0 1px #7ee2b81a; }
+.dataset-progress strong { font-size: 12px; color: var(--mint); text-transform: uppercase; letter-spacing: .08em; }
+.dataset-actions button.stop { margin-top: 0; background: #d87568; }
+.dataset-actions button.stop:disabled { opacity: .45; cursor: not-allowed; }
 .dataset-hash-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
 .dataset-hash-list li { display: grid; gap: 3px; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--line); background: #0c1714; }
 .dataset-hash-list .tabular { font-variant-numeric: tabular-nums; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; color: var(--mint); }
