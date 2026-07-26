@@ -137,18 +137,40 @@ final class CaptureRecorder: NSObject, AVCaptureVideoDataOutputSampleBufferDeleg
                 "videoPath": videoURL.path,
             ]
         )
-        protocolWriter.emit(
-            type: "recording_finished",
-            payload: [
-                "exitCode": 0,
-                "cancelled": false,
-                "segments": 1,
-                "dryRun": true,
-                "sessionRoot": request.sessionRoot,
-            ]
-        )
+        let finishedPayload: [String: Any] = [
+            "exitCode": 0,
+            "cancelled": false,
+            "segments": 1,
+            "dryRun": true,
+            "sessionRoot": request.sessionRoot,
+            "status": "complete",
+        ]
+        protocolWriter.emit(type: "recording_finished", payload: finishedPayload)
+        writeSessionMarker(name: "recording-finished.json", payload: finishedPayload)
         protocolWriter.emit(type: "state", payload: ["state": "finished", "dryRun": true])
         return .success
+    }
+
+    /// On-disk session seal so Rust/Tauri orphan scan can distinguish complete vs incomplete.
+    private func writeSessionMarker(name: String, payload: [String: Any]) {
+        let root = URL(fileURLWithPath: request.sessionRoot, isDirectory: true)
+        let url = root.appendingPathComponent(name)
+        var body = payload
+        body["protocolVersion"] = CaptureProtocol.version
+        body["sessionId"] = request.sessionId
+        body["writtenAt"] = ISO8601DateFormatter().string(from: Date())
+        guard JSONSerialization.isValidJSONObject(body),
+              let data = try? JSONSerialization.data(withJSONObject: body, options: [.prettyPrinted, .sortedKeys])
+        else {
+            protocolWriter.log("failed to serialize \(name)")
+            return
+        }
+        do {
+            try data.write(to: url, options: .atomic)
+            protocolWriter.log("wrote \(url.path)")
+        } catch {
+            protocolWriter.log("failed to write \(name): \(error.localizedDescription)")
+        }
     }
 
     private func scheduleHealthTimer() {
@@ -483,8 +505,13 @@ final class CaptureRecorder: NSObject, AVCaptureVideoDataOutputSampleBufferDeleg
                     "videoFrames": self.videoFrames,
                     "audioBuffers": self.audioBuffers,
                     "sessionRoot": self.request.sessionRoot,
+                    "status": cancel ? "cancelled" : "complete",
                 ]
                 self.protocolWriter.emit(type: "recording_finished", payload: payload)
+                self.writeSessionMarker(name: "recording-finished.json", payload: payload)
+                if cancel {
+                    self.writeSessionMarker(name: "recording-cancelled.json", payload: payload)
+                }
                 self.protocolWriter.emit(
                     type: "state",
                     payload: ["state": cancel ? "failed" : "finished"]

@@ -12,6 +12,22 @@
 
 See `docs/CAPTURE_CORE_CHARTER.md` and `docs/adr/ADR-004-capture-core-provisional.md`.
 
+Agent-safe software smoke (no camera / TCC):
+
+```sh
+sh scripts/dev/test-capture-core-dry-run.sh
+# from repo root; or:
+swift run --package-path native/capture-macos capture-core record --request <dryRun request.json>
+```
+
+Tauri supervisor (Rust): `capture_core_record`, `capture_core_hash_file`,
+`capture_core_hash_segments`, `capture_core_scan_orphans`, `capture_core_list_devices`.
+Set `CAPTURE_CORE_BIN` to the built binary path if not discovered automatically.
+
+On-disk seals (orphan scan):
+- Swift writes `recording-finished.json` on clean stop / dry-run
+- Rust writes `session-seal.json` with streamed SHA-256 of segment files
+
 ```sh
 # List AVFoundation uniqueIDs (needs camera/mic access for full use)
 swift run --package-path native/capture-macos capture-core list-devices

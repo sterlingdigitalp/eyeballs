@@ -1,9 +1,15 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod capture_core;
 mod persistence;
 
+use capture_core::{
+    hash_session_segments, list_capture_devices, run_capture_record, scan_orphan_sessions,
+    sha256_file, CaptureRecordRequest, CaptureRunResult, SegmentHash,
+};
 use persistence::Database;
 use serde_json::Value;
+use std::path::PathBuf;
 use std::sync::Mutex;
 use tauri::{Manager, State};
 use tracing::{error, info, warn};
@@ -88,11 +94,50 @@ fn log_event(
     }
 }
 
+/// Run CaptureCore record (prefer dryRun: true until TCC-capable host).
+#[tauri::command]
+fn capture_core_record(request: CaptureRecordRequest) -> Result<CaptureRunResult, String> {
+    run_capture_record(request)
+}
+
+/// Stream SHA-256 for a single closed file path.
+#[tauri::command]
+fn capture_core_hash_file(path: String) -> Result<SegmentHash, String> {
+    let path = PathBuf::from(path);
+    let (sha256, byte_length) = sha256_file(&path)?;
+    Ok(SegmentHash {
+        path: path.display().to_string(),
+        sha256,
+        byte_length,
+    })
+}
+
+/// Hash all files under sessionRoot/master/segments.
+#[tauri::command]
+fn capture_core_hash_segments(session_root: String) -> Result<Vec<SegmentHash>, String> {
+    hash_session_segments(PathBuf::from(session_root).as_path())
+}
+
+/// List incomplete session dirs under app data sessions root (or provided path).
+#[tauri::command]
+fn capture_core_scan_orphans(sessions_root: String) -> Result<Value, String> {
+    let orphans = scan_orphan_sessions(PathBuf::from(sessions_root).as_path())?;
+    Ok(serde_json::json!({ "orphans": orphans }))
+}
+
+/// AVFoundation device inventory via capture-core list-devices.
+#[tauri::command]
+fn capture_core_list_devices() -> Result<Value, String> {
+    list_capture_devices()
+}
+
 pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
             let data_dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&data_dir)?;
+            let sessions_dir = data_dir.join("sessions");
+            std::fs::create_dir_all(&sessions_dir)?;
             let log_dir = app.path().app_log_dir()?;
             std::fs::create_dir_all(&log_dir)?;
             let file_appender = tracing_appender::rolling::daily(log_dir, "presence.jsonl");
@@ -106,7 +151,7 @@ pub fn run() {
             app.manage(AppState {
                 database: Mutex::new(database),
             });
-            info!("application_initialized");
+            info!(sessions = %sessions_dir.display(), "application_initialized");
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -114,7 +159,12 @@ pub fn run() {
             load_json,
             list_json,
             health,
-            log_event
+            log_event,
+            capture_core_record,
+            capture_core_hash_file,
+            capture_core_hash_segments,
+            capture_core_scan_orphans,
+            capture_core_list_devices
         ])
         .run(tauri::generate_context!())
         .expect("error while running Camera Presence Coach");

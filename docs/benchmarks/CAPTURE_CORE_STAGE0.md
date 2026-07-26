@@ -64,9 +64,22 @@ $BIN record --request /tmp/cc-dry-req.json
 
 Expect: `state starting → recording → segment_finalized → recording_finished → finished`, exit 0.
 
+## Software progress (no live camera)
+
+| Item | Status |
+|---|---|
+| Profile `deviceBindings` + `captureCoreDeviceIds()` | Contracts + unit test |
+| `buildCaptureCoreRecordRequest` + protocol schemas | Contracts |
+| Rust streaming SHA-256 of closed segment files | `capture_core.rs` + cargo tests |
+| Rust `session-seal.json` after clean exit | `write_session_seal` |
+| Swift `recording-finished.json` on finish/cancel | Dry-run + live stop |
+| Tauri commands: record / hash / orphan scan / list-devices | Registered in `lib.rs` |
+| TS client `apps/desktop/src/lib/capture-core.ts` | Invoke wrappers |
+| `scripts/dev/test-capture-core-dry-run.sh` | Protocol + on-disk seal smoke |
+
 ## Next (Stage 2–4)
 
 1. Human/Terminal Stage 0 hardware matrix (Brio 4K/30, Yeti, kill, clean stop).  
 2. Harden writers after first successful live take (PCM audio, segment rotation under load).  
-3. Tauri sidecar supervision + Rust SHA-256 of closed segment files.  
-4. Dual device bindings on profiles (`avFoundationCameraId` / webview id).
+3. Wire Dataset UI button → `captureCoreDryRun` / `captureCoreRecord` (needs sessions dir + stop webview camera).  
+4. Package capture-core as Tauri externalBin sidecar for release builds.

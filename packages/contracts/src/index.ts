@@ -8,6 +8,15 @@ export const featureFlagsSchema = z.object({
 });
 export type FeatureFlags = z.infer<typeof featureFlagsSchema>;
 
+/** Webview MediaDeviceInfo.deviceId and AVFoundation uniqueID are not the same. */
+export const deviceBindingsSchema = z.object({
+  webviewCameraId: z.string().optional(),
+  avFoundationCameraId: z.string().optional(),
+  webviewMicrophoneId: z.string().optional(),
+  avFoundationMicrophoneId: z.string().optional(),
+});
+export type DeviceBindings = z.infer<typeof deviceBindingsSchema>;
+
 export const captureProfileSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
@@ -16,6 +25,8 @@ export const captureProfileSchema = z.object({
   cameraLabel: z.string(),
   microphoneDeviceId: z.string(),
   microphoneLabel: z.string(),
+  /** Optional dual-provider device identity for CaptureCore vs webview. */
+  deviceBindings: deviceBindingsSchema.optional(),
   requestedVideo: z.object({
     width: z.number().int().positive(),
     height: z.number().int().positive(),
@@ -45,6 +56,121 @@ export const captureProfileSchema = z.object({
   updatedAt: z.string().datetime(),
 });
 export type CaptureProfile = z.infer<typeof captureProfileSchema>;
+
+/** Build CaptureCore request device IDs from a profile (prefers AVFoundation bindings). */
+export function captureCoreDeviceIds(profile: CaptureProfile): {
+  cameraUniqueId: string;
+  microphoneUniqueId?: string;
+} {
+  const camera =
+    profile.deviceBindings?.avFoundationCameraId ||
+    profile.deviceBindings?.webviewCameraId ||
+    profile.cameraDeviceId;
+  const mic =
+    profile.deviceBindings?.avFoundationMicrophoneId ||
+    profile.deviceBindings?.webviewMicrophoneId ||
+    (profile.microphoneDeviceId || undefined);
+  return {
+    cameraUniqueId: camera,
+    microphoneUniqueId: mic || undefined,
+  };
+}
+
+/** CaptureCore JSONL protocol version (Swift + Rust + TS). */
+export const CAPTURE_CORE_PROTOCOL_VERSION = "1.0.0" as const;
+
+export const captureCoreRecordRequestSchema = z.object({
+  sessionId: z.string().min(1),
+  sessionRoot: z.string().min(1),
+  cameraUniqueId: z.string().min(1),
+  microphoneUniqueId: z.string().optional(),
+  video: z.object({
+    width: z.number().int().positive(),
+    height: z.number().int().positive(),
+    frameRate: z.number().positive(),
+  }),
+  audio: z
+    .object({
+      sampleRate: z.number().positive(),
+      channelCount: z.number().int().positive(),
+    })
+    .optional(),
+  segmentDurationSec: z.number().positive().optional(),
+  maxDurationSec: z.number().positive().optional(),
+  videoOnly: z.boolean().optional(),
+  dryRun: z.boolean().optional(),
+});
+export type CaptureCoreRecordRequest = z.infer<typeof captureCoreRecordRequestSchema>;
+
+export const captureCoreSegmentHashSchema = z.object({
+  path: z.string(),
+  sha256: z.string().length(64),
+  byteLength: z.number().int().nonnegative(),
+});
+export type CaptureCoreSegmentHash = z.infer<typeof captureCoreSegmentHashSchema>;
+
+export const captureCoreRunResultSchema = z.object({
+  exitCode: z.number().int(),
+  events: z.array(z.record(z.string(), z.unknown())),
+  segmentHashes: z.array(captureCoreSegmentHashSchema),
+  sessionRoot: z.string(),
+  dryRun: z.boolean(),
+  sealPath: z.string().optional().nullable(),
+});
+export type CaptureCoreRunResult = z.infer<typeof captureCoreRunResultSchema>;
+
+export const captureCoreDeviceOutSchema = z.object({
+  uniqueId: z.string(),
+  name: z.string(),
+  manufacturer: z.string(),
+  kind: z.string(),
+});
+export type CaptureCoreDeviceOut = z.infer<typeof captureCoreDeviceOutSchema>;
+
+export const captureCoreDeviceInventorySchema = z.object({
+  protocolVersion: z.string(),
+  generatedAt: z.string(),
+  cameras: z.array(captureCoreDeviceOutSchema),
+  microphones: z.array(captureCoreDeviceOutSchema),
+});
+export type CaptureCoreDeviceInventory = z.infer<typeof captureCoreDeviceInventorySchema>;
+
+/** Build a CaptureCore record request from a profile + session paths. */
+export function buildCaptureCoreRecordRequest(input: {
+  sessionId: string;
+  sessionRoot: string;
+  profile: CaptureProfile;
+  maxDurationSec?: number;
+  segmentDurationSec?: number;
+  dryRun?: boolean;
+  videoOnly?: boolean;
+}): CaptureCoreRecordRequest {
+  const ids = captureCoreDeviceIds(input.profile);
+  const video = input.profile.negotiatedVideo ?? input.profile.requestedVideo;
+  const audio = input.profile.negotiatedAudio;
+  return captureCoreRecordRequestSchema.parse({
+    sessionId: input.sessionId,
+    sessionRoot: input.sessionRoot,
+    cameraUniqueId: ids.cameraUniqueId,
+    microphoneUniqueId: input.videoOnly ? undefined : ids.microphoneUniqueId,
+    video: {
+      width: video.width,
+      height: video.height,
+      frameRate: video.frameRate,
+    },
+    audio:
+      input.videoOnly || !audio
+        ? undefined
+        : {
+            sampleRate: audio.sampleRate,
+            channelCount: audio.channelCount,
+          },
+    maxDurationSec: input.maxDurationSec,
+    segmentDurationSec: input.segmentDurationSec,
+    videoOnly: input.videoOnly,
+    dryRun: input.dryRun,
+  });
+}
 
 export const featureVectorSchema = z.object({
   schemaVersion: z.literal("1.0.0"),
