@@ -16,31 +16,54 @@ Worktree: isolated from Phase 2/3 coaching tree
 | Info.plist + minimal `.app` package script | Implemented (`scripts/package-capture-core-app.sh`) |
 | `dryRun` request flag | Implemented for protocol CI without TCC |
 
-## Live camera proof (blocked in agent host)
+## Live camera proof
 
-Running under the Grok/Hive agent, `requestAccess(for: .video)` is aborted by TCC:
+### Agent host (blocked)
 
-```text
-namespace: TCC
-details: attempted to access privacy-sensitive data without a usage description
-```
+Running under the Grok/Hive agent, `requestAccess(for: .video)` is aborted by TCC (`responsibleProc = hive`). Live proof must use Terminal / packaged app / Tauri parent.
 
-Even when `Bundle.main` **does** contain `NSCameraUsageDescription` (verified via log), the crash report attributes **responsibleProc = hive**. On current macOS, privacy prompts/access for child processes can be enforced against the **responsible parent**, which lacks a camera usage string.
+### Human Terminal proof — 2026-07-26 (PASS for dual short take)
 
-**Implication:** Stage 0 hardware proof (4K Brio, Brio+Yeti, kill recovery) must be run from:
+Host: packaged `CaptureCore.app` via `scripts/package-capture-core-app.sh`  
+Session: `/tmp/capture-core-stage0-dual` · `maxDurationSec: 15` · exit **0**
 
-1. **Terminal.app** (or iTerm) with Camera allowed, using packaged `CaptureCore.app`, or  
-2. The future **Tauri host** as parent (correct permanent design — sidecar inherits product TCC story).
+| Device | Role | AVFoundation `uniqueId` |
+|---|---|---|
+| Logitech BRIO | camera | `0x1200000046d085e` |
+| Yeti Stereo Microphone | mic | `AppleUSBAudioEngine:Generic:Blue Microphones:LT_2007152009165F390492_111000:1` |
 
-Commands for local Stage 0 proof:
+Request: 3840×2160@30 + audio 48 kHz mono (not dry-run).
+
+| Check | Result |
+|---|---|
+| TCC (camera + mic) under packaged app | Pass (`videoStatus=0`, configure complete) |
+| Dual Brio + Yeti | Pass |
+| Protocol | `starting → recording → stopping → segment_finalized → recording_finished → finished` |
+| Masters on disk | `seg_000_video.mov` (~62.2 MB), `seg_000_audio.caf` (~275 KB) |
+| `recording-finished.json` | `status: complete`, `exitCode: 0`, 364 video frames, 1417 audio buffers |
+| Sample PTS logged | `firstVideoPtsUs`, `firstAudioPtsUs` present |
+| Append failures | video 0 / audio 0 |
+| Startup drops | `droppedVideo: 3` (acceptable for short take) |
+| ffprobe video | **3840×2160** H.264, duration ~15.17 s |
+| ffprobe/afinfo audio | AAC mono **48 kHz**, duration ~15.17 s |
+| SHA-256 video | `e85ca44cf2a017e699964561589e5c349be8628808c39795792759ce329316ec` |
+| SHA-256 audio | `e9dd7bf1c6179190735e8ca786f9124ce73700a80d70faac90dc8a9c42bf04a5` |
+
+**Follow-ups (not blockers for coding ahead):**
+
+1. Requested 30 fps; container reports ~**24 fps** — confirm active format / writer timescale.  
+2. Audio is **AAC in CAF**, not raw PCM — charter prefers PCM for masters; change after vertical slice.  
+3. Process-kill recovery take still optional.  
+4. 1h soak remains Stage 6 hardening.
+
+### Commands used
 
 ```sh
 cd native/capture-macos
 ./scripts/package-capture-core-app.sh
 APP=.build/CaptureCore.app/Contents/MacOS/capture-core
 $APP list-devices
-# grant Camera to CaptureCore in System Settings if prompted
-# then record with real request.json (maxDurationSec: 10, Brio uniqueId, Yeti uniqueId)
+# record with Brio + Yeti uniqueIds, maxDurationSec 15, 4K/30
 ```
 
 ## Protocol smoke (agent-safe)
@@ -89,7 +112,8 @@ Expect: `state starting → recording → segment_finalized → recording_finish
 
 ## Next (Stage 2–4)
 
-1. Human/Terminal Stage 0 hardware matrix (Brio 4K/30, Yeti, kill, clean stop).  
-2. Harden writers after first successful live take (PCM audio, segment rotation under load).  
-3. Live record from Dataset (post–Stage 0) with explicit duration + stop.  
-4. Package capture-core as Tauri externalBin sidecar for release builds.
+1. ~~Human dual short take~~ **Done** (see above). Optional: kill-recovery take.  
+2. Live Dataset record in Tauri (release webview camera → real record, not only dry-run).  
+3. Harden: force 30 fps format if available; PCM audio masters; segment rotation under load.  
+4. Package capture-core as Tauri externalBin sidecar for release builds.  
+5. Later: 1h soak + failure matrix before ADR-004 → Accepted.
