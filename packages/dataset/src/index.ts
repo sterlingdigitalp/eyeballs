@@ -14,5 +14,6 @@ export * from "./coverage";
 export * from "./duplicates";
 export * from "./versioning";
 export * from "./presenter-twin-experiment";
+export * from "./phase4-artifacts";
 export * from "./sha256";
 export * from "./export-download";

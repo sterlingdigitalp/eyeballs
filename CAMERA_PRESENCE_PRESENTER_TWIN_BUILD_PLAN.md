@@ -2833,6 +2833,16 @@ No generation provider has been selected and no source has been uploaded.
 Capturing the matched A–D inputs, producing candidates, running blind review,
 and publishing the go/no-go remain empirical Phase 4 work.
 
+Software added after the initial contracts (same day continuum):
+
+- go/no-go draft download with each experiment manifest;
+- public blind schedule + private reveal export;
+- evaluator rating sheet (JSON + CSV) export;
+- candidate archive schema with content hash;
+- helpers to build A–D source packages from sealed masters;
+- CaptureCore Stage 6 soak hash authorities accepted on seal ingest;
+- on-screen empirical capture checklist.
+
 ### 14.3 Experimental conditions
 
 Create at least four source conditions:

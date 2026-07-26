@@ -8,8 +8,11 @@ import {
   buildBlindEvaluationSchedule,
   createPhase4GoNoGoDraft,
   createPresenterTwinExperiment,
+  emptyRatingSheet,
+  phase4CaptureChecklist,
   publicBlindScheduleArtifact,
   phase4ProviderRequirementsSchema,
+  ratingSheetToCsv,
   sha256Hex,
   type DatasetVersionManifest,
   type Phase4SourcePackage,
@@ -282,6 +285,8 @@ export function PresenterTwinPanel({
       Boolean(asset.sha256),
   );
 
+  const checklist = phase4CaptureChecklist();
+
   return (
     <section className="screen">
       <div className="screen-copy">
@@ -292,6 +297,17 @@ export function PresenterTwinPanel({
           voice, equivalent output settings, immutable lineage, and a reviewed
           provider record before producing generation requests.
         </p>
+      </div>
+      <div className="panel" style={{ marginBottom: 24 }}>
+        <h2>Capture checklist (empirical)</h2>
+        <ol className="readiness-list">
+          {checklist.map((item) => (
+            <li key={item.id}>
+              <strong>{item.title}</strong>
+              <span className="muted"> — {item.detail}</span>
+            </li>
+          ))}
+        </ol>
       </div>
       <div className="setup-grid">
         <div className="panel">
@@ -443,12 +459,25 @@ export function PresenterTwinPanel({
                     privateReveal: schedule.privateReveal,
                   },
                 );
+                const sheet = emptyRatingSheet({
+                  experimentId: lastExperiment.id,
+                  blindIds: schedule.publicEntries.map((entry) => entry.blindId),
+                });
+                downloadJson(`${lastExperiment.id}-rating-sheet.json`, sheet);
+                const csv = ratingSheetToCsv(sheet);
+                const blob = new Blob([csv], { type: "text/csv" });
+                const url = URL.createObjectURL(blob);
+                const anchor = document.createElement("a");
+                anchor.href = url;
+                anchor.download = `${lastExperiment.id}-rating-sheet.csv`;
+                anchor.click();
+                URL.revokeObjectURL(url);
                 setMessage(
-                  "Downloaded public blind schedule (no conditions) and private reveal key — keep reveal offline.",
+                  "Downloaded public blind schedule, private reveal, and rating sheet (JSON+CSV). Keep reveal offline.",
                 );
               }}
             >
-              Export blind schedule
+              Export blind schedule + ratings
             </button>
           </div>
           {message && <p className="muted">{message}</p>}
