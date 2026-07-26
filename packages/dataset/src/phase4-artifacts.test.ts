@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   attachCandidateArchiveToExperimentNotes,
   emptyRatingSheet,
+  measureEvaluatorConsistency,
+  parseRatingSheetCsv,
   phase4CaptureChecklist,
+  proposePhase4Decision,
   ratingSheetToCsv,
   sealCandidateArchive,
 } from "./phase4-artifacts";
@@ -78,5 +81,51 @@ describe("Phase 4 empirical artifacts", () => {
     const list = phase4CaptureChecklist();
     expect(list.some((item) => item.id === "condition_a")).toBe(true);
     expect(list.some((item) => item.id === "decision")).toBe(true);
+  });
+
+  it("round-trips rating CSV and measures consistency on repeats", () => {
+    const sheet = emptyRatingSheet({
+      experimentId: "exp-1",
+      blindIds: ["candidate-001", "candidate-002"],
+      evaluatorId: "r1",
+      createdAt: "2026-07-26T12:00:00.000Z",
+    });
+    sheet.ratings[0].scores.overall_usefulness = 4;
+    sheet.ratings[1].scores.overall_usefulness = 5;
+    const parsed = parseRatingSheetCsv(
+      ratingSheetToCsv(sheet),
+      "exp-1",
+      "2026-07-26T12:00:00.000Z",
+    );
+    expect(parsed.ratings).toHaveLength(2);
+    const consistency = measureEvaluatorConsistency({
+      ratings: [
+        ...parsed.ratings,
+        {
+          ...parsed.ratings[0],
+          blindId: "candidate-003",
+          scores: {
+            ...parsed.ratings[0].scores,
+            overall_usefulness: 4,
+          },
+        },
+      ],
+      privateReveal: [
+        { blindId: "candidate-001", candidateId: "c-a" },
+        {
+          blindId: "candidate-003",
+          candidateId: "c-a",
+          repeatedFromBlindId: "candidate-001",
+        },
+      ],
+    });
+    expect(consistency.pairsCompared).toBe(1);
+    expect(consistency.meanAbsoluteDelta).toBe(0);
+    expect(proposePhase4Decision({
+      coachedWinRate: 0.8,
+      decidedComparisons: 5,
+      hasAcceptableCandidate: true,
+      providerAcceptable: true,
+    }).suggested).toBe("go");
   });
 });

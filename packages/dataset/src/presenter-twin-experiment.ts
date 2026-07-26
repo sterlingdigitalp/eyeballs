@@ -577,6 +577,10 @@ export function createPhase4GoNoGoDraft(args: {
     coachedWinRate: number;
   };
   openRisks?: string[];
+  /** Suggested by software; final published decision remains human-set. */
+  suggestedDecision?: Phase4GoNoGoReport["decision"];
+  decisionRationale?: string;
+  decision?: Phase4GoNoGoReport["decision"];
 }): Phase4GoNoGoReport {
   return {
     format: "presenter-twin-go-no-go/1.0.0",
@@ -588,9 +592,12 @@ export function createPhase4GoNoGoDraft(args: {
     providerId: args.experiment.provider.providerId || undefined,
     providerVersion: args.experiment.provider.providerVersion || undefined,
     coachedVsBaseline: args.coachedVsBaseline,
-    decision: "pending",
+    decision: args.decision ?? "pending",
     decisionRationale:
-      "Empirical blind evaluation and human review not yet complete.",
+      args.decisionRationale ??
+      (args.suggestedDecision
+        ? `Software suggestion: ${args.suggestedDecision}. Human confirmation required.`
+        : "Empirical blind evaluation and human review not yet complete."),
     openRisks: args.openRisks ?? [
       "No generation candidates produced yet",
       "Blind ratings empty",

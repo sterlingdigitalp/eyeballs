@@ -316,3 +316,257 @@ export function attachCandidateArchiveToExperimentNotes(args: {
     ],
   };
 }
+
+/** Parse a rating sheet JSON blob (exported template or filled returns). */
+export function parseRatingSheet(raw: unknown): Phase4RatingSheet {
+  return phase4RatingSheetSchema.parse(raw);
+}
+
+/**
+ * Parse a simple CSV rating sheet (header must include evaluatorId, blindId,
+ * each evaluation dimension).
+ */
+export function parseRatingSheetCsv(
+  csv: string,
+  experimentId: string,
+  createdAt = new Date().toISOString(),
+): Phase4RatingSheet {
+  const lines = csv
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (lines.length < 2) {
+    throw new Error("Rating CSV needs a header and at least one data row");
+  }
+  const header = splitCsvLine(lines[0]).map((cell) => cell.trim());
+  const idx = (name: string) => {
+    const index = header.indexOf(name);
+    if (index < 0) throw new Error(`Rating CSV missing column ${name}`);
+    return index;
+  };
+  const evaluatorIdx = idx("evaluatorId");
+  const blindIdx = idx("blindId");
+  const reasonIdx = header.indexOf("preferenceReason");
+  const ratedIdx = header.indexOf("ratedAt");
+  const dimIdx = Object.fromEntries(
+    evaluationDimensions.map((dimension) => [dimension, idx(dimension)]),
+  );
+  const ratings = lines.slice(1).map((line) => {
+    const cells = splitCsvLine(line);
+    const scores = Object.fromEntries(
+      evaluationDimensions.map((dimension) => {
+        const value = Number(cells[dimIdx[dimension]]);
+        if (!Number.isInteger(value) || value < 1 || value > 5) {
+          throw new Error(
+            `Invalid score for ${dimension} on blindId ${cells[blindIdx]}`,
+          );
+        }
+        return [dimension, value];
+      }),
+    );
+    return phase4RatingSheetEntrySchema.parse({
+      evaluatorId: cells[evaluatorIdx],
+      blindId: cells[blindIdx],
+      scores,
+      preferenceReason:
+        reasonIdx >= 0 ? unquote(cells[reasonIdx] ?? "") : undefined,
+      ratedAt: ratedIdx >= 0 && cells[ratedIdx] ? cells[ratedIdx] : createdAt,
+    });
+  });
+  return phase4RatingSheetSchema.parse({
+    format: PHASE4_RATING_SHEET_FORMAT,
+    experimentId,
+    createdAt,
+    ratings,
+  });
+}
+
+function splitCsvLine(line: string): string[] {
+  const cells: string[] = [];
+  let current = "";
+  let inQuotes = false;
+  for (let index = 0; index < line.length; index += 1) {
+    const char = line[index];
+    if (char === '"') {
+      if (inQuotes && line[index + 1] === '"') {
+        current += '"';
+        index += 1;
+      } else {
+        inQuotes = !inQuotes;
+      }
+      continue;
+    }
+    if (char === "," && !inQuotes) {
+      cells.push(current);
+      current = "";
+      continue;
+    }
+    current += char;
+  }
+  cells.push(current);
+  return cells;
+}
+
+function unquote(value: string): string {
+  if (value.startsWith('"') && value.endsWith('"')) {
+    return value.slice(1, -1).replaceAll('""', '"');
+  }
+  return value;
+}
+
+export interface EvaluatorConsistencyReport {
+  pairsCompared: number;
+  meanAbsoluteDelta: number;
+  /** Share of repeated pairs with absolute overall_usefulness delta ≤ 1. */
+  withinOnePointRate: number;
+}
+
+/**
+ * Measure consistency on repeated blind IDs (same candidate rated twice).
+ * `privateReveal` maps blindId → candidateId (and optional repeatedFromBlindId).
+ */
+export function measureEvaluatorConsistency(args: {
+  ratings: Phase4RatingSheetEntry[];
+  privateReveal: Array<{
+    blindId: string;
+    candidateId: string;
+    repeatedFromBlindId?: string;
+  }>;
+}): EvaluatorConsistencyReport {
+  const byBlind = new Map(
+    args.ratings.map((rating) => [
+      `${rating.evaluatorId}:${rating.blindId}`,
+      rating,
+    ]),
+  );
+  const deltas: number[] = [];
+  for (const reveal of args.privateReveal) {
+    if (!reveal.repeatedFromBlindId) continue;
+    for (const rating of args.ratings) {
+      if (rating.blindId !== reveal.blindId) continue;
+      const original = byBlind.get(
+        `${rating.evaluatorId}:${reveal.repeatedFromBlindId}`,
+      );
+      if (!original) continue;
+      const a = rating.scores.overall_usefulness ?? 0;
+      const b = original.scores.overall_usefulness ?? 0;
+      deltas.push(Math.abs(a - b));
+    }
+  }
+  if (!deltas.length) {
+    return { pairsCompared: 0, meanAbsoluteDelta: 0, withinOnePointRate: 0 };
+  }
+  const meanAbsoluteDelta =
+    deltas.reduce((sum, value) => sum + value, 0) / deltas.length;
+  const withinOnePointRate =
+    deltas.filter((value) => value <= 1).length / deltas.length;
+  return {
+    pairsCompared: deltas.length,
+    meanAbsoluteDelta,
+    withinOnePointRate,
+  };
+}
+
+/** Expert frame-by-frame artifact inspection checklist (plan §14.7). */
+export function expertArtifactChecklist(): Array<{
+  id: string;
+  title: string;
+  detail: string;
+}> {
+  return [
+    {
+      id: "mouth",
+      title: "Mouth tearing / blur",
+      detail: "Inspect lip edges on plosives and wide vowels.",
+    },
+    {
+      id: "eyes",
+      title: "Eye flicker / gaze drift",
+      detail: "Watch blinks and mid-sentence camera contact.",
+    },
+    {
+      id: "identity",
+      title: "Identity drift",
+      detail: "Face shape stability across expressions and turns.",
+    },
+    {
+      id: "temporal",
+      title: "Frame-to-frame jitter",
+      detail: "Stepping, freezing, or warping between adjacent frames.",
+    },
+    {
+      id: "background",
+      title: "Background warping",
+      detail: "Edges and lighting stability behind the speaker.",
+    },
+    {
+      id: "uncanny",
+      title: "Uncanny / unusable moments",
+      detail: "Any second that would block social or presentation use.",
+    },
+  ];
+}
+
+/**
+ * Propose a go/no-go from blind summary + optional consistency.
+ * Human must still set final decision; this only suggests.
+ */
+export function proposePhase4Decision(args: {
+  coachedWinRate: number;
+  decidedComparisons: number;
+  consistency?: EvaluatorConsistencyReport;
+  hasAcceptableCandidate?: boolean;
+  providerAcceptable?: boolean;
+}): {
+  suggested: "go" | "no_go" | "inconclusive" | "pending";
+  rationale: string;
+} {
+  if (args.decidedComparisons < 1) {
+    return {
+      suggested: "pending",
+      rationale: "No decided coached-vs-baseline comparisons yet.",
+    };
+  }
+  if (args.consistency && args.consistency.pairsCompared > 0) {
+    if (args.consistency.withinOnePointRate < 0.5) {
+      return {
+        suggested: "inconclusive",
+        rationale:
+          "Evaluator consistency on repeats is low; collect more ratings before deciding.",
+      };
+    }
+  }
+  if (args.hasAcceptableCandidate === false) {
+    return {
+      suggested: "no_go",
+      rationale:
+        "No candidate marked acceptable for the intended presenter use case.",
+    };
+  }
+  if (args.providerAcceptable === false) {
+    return {
+      suggested: "no_go",
+      rationale: "Provider data-control or rights posture is unacceptable.",
+    };
+  }
+  // Plan: clear majority for coached over baseline
+  if (args.coachedWinRate >= 0.66 && args.decidedComparisons >= 3) {
+    return {
+      suggested: "go",
+      rationale:
+        "Coached condition wins a clear majority of decided comparisons; continue only if at least one candidate is usable.",
+    };
+  }
+  if (args.coachedWinRate <= 0.4 && args.decidedComparisons >= 3) {
+    return {
+      suggested: "no_go",
+      rationale:
+        "Coached condition does not beat baseline on matched comparisons.",
+    };
+  }
+  return {
+    suggested: "inconclusive",
+    rationale:
+      "Results are mixed or sample size is small; expand ratings or test a second provider.",
+  };
+}

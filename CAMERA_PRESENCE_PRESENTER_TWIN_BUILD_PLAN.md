@@ -2837,9 +2837,12 @@ Software added after the initial contracts (same day continuum):
 
 - go/no-go draft download with each experiment manifest;
 - public blind schedule + private reveal export;
-- evaluator rating sheet (JSON + CSV) export;
-- candidate archive schema with content hash;
+- evaluator rating sheet (JSON + CSV) export **and import**;
+- coached-vs-baseline scoring + evaluator consistency on repeats;
+- software **suggestion** for go/no-go (human confirmation required);
+- candidate archive schema with content hash **and import**;
 - helpers to build A–D source packages from sealed masters;
+- expert frame-by-frame artifact checklist (plan §14.7);
 - CaptureCore Stage 6 soak hash authorities accepted on seal ingest;
 - on-screen empirical capture checklist.
 

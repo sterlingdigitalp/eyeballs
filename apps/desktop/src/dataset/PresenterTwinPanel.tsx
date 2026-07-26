@@ -4,17 +4,27 @@ import type {
   RecordingAsset,
 } from "../../../../packages/contracts/src";
 import {
+  attachCandidateArchiveToExperimentNotes,
   auditPresenterTwinReadiness,
   buildBlindEvaluationSchedule,
   createPhase4GoNoGoDraft,
   createPresenterTwinExperiment,
   emptyRatingSheet,
+  expertArtifactChecklist,
+  measureEvaluatorConsistency,
+  parseRatingSheet,
+  parseRatingSheetCsv,
+  phase4CandidateArchiveSchema,
   phase4CaptureChecklist,
+  proposePhase4Decision,
   publicBlindScheduleArtifact,
   phase4ProviderRequirementsSchema,
   ratingSheetToCsv,
   sha256Hex,
+  summarizeCoachedVsBaseline,
+  type BlindEvaluationSchedule,
   type DatasetVersionManifest,
+  type Phase4RatingSheet,
   type Phase4SourcePackage,
   type PresenterTwinExperiment,
 } from "../../../../packages/dataset/src";
@@ -100,6 +110,11 @@ export function PresenterTwinPanel({
   const [message, setMessage] = useState<string>();
   const [lastExperiment, setLastExperiment] =
     useState<PresenterTwinExperiment>();
+  const [privateReveal, setPrivateReveal] = useState<
+    BlindEvaluationSchedule["privateReveal"]
+  >([]);
+  const [importedRatings, setImportedRatings] = useState<Phase4RatingSheet>();
+  const [evaluationSummary, setEvaluationSummary] = useState<string>();
 
   useEffect(() => {
     void store.datasetVersions.all().then((raw) => {
@@ -286,6 +301,144 @@ export function PresenterTwinPanel({
   );
 
   const checklist = phase4CaptureChecklist();
+  const expertChecklist = expertArtifactChecklist();
+
+  const importReveal = async (file: File | undefined) => {
+    if (!file) return;
+    try {
+      const raw = JSON.parse(await file.text()) as {
+        privateReveal?: BlindEvaluationSchedule["privateReveal"];
+      };
+      if (!raw.privateReveal?.length) {
+        throw new Error("File missing privateReveal array");
+      }
+      setPrivateReveal(raw.privateReveal);
+      setMessage(
+        `Loaded private reveal with ${raw.privateReveal.length} entries — keep offline.`,
+      );
+    } catch (cause) {
+      setMessage(cause instanceof Error ? cause.message : String(cause));
+    }
+  };
+
+  const importRatings = async (file: File | undefined) => {
+    if (!file || !lastExperiment) return;
+    try {
+      const text = await file.text();
+      const sheet = file.name.endsWith(".csv")
+        ? parseRatingSheetCsv(text, lastExperiment.id)
+        : parseRatingSheet(JSON.parse(text));
+      if (sheet.experimentId !== lastExperiment.id) {
+        throw new Error(
+          `Rating sheet experiment ${sheet.experimentId} does not match ${lastExperiment.id}`,
+        );
+      }
+      setImportedRatings(sheet);
+      await store.settings.put(
+        `presenterTwinRatings:${lastExperiment.id}`,
+        sheet,
+      );
+      setMessage(
+        `Imported ${sheet.ratings.length} ratings for ${lastExperiment.id.slice(0, 18)}…`,
+      );
+    } catch (cause) {
+      setMessage(cause instanceof Error ? cause.message : String(cause));
+    }
+  };
+
+  const importCandidateArchive = async (file: File | undefined) => {
+    if (!file || !lastExperiment) return;
+    try {
+      const archive = phase4CandidateArchiveSchema.parse(
+        JSON.parse(await file.text()),
+      );
+      const note = attachCandidateArchiveToExperimentNotes({
+        experiment: lastExperiment,
+        archive,
+      });
+      await store.settings.put(
+        `presenterTwinCandidates:${lastExperiment.id}`,
+        archive,
+      );
+      setMessage(
+        `Candidate archive attached · ${note.candidateCount} entries · hash ${note.archiveManifestSha256?.slice(0, 12) ?? "n/a"}…`,
+      );
+    } catch (cause) {
+      setMessage(cause instanceof Error ? cause.message : String(cause));
+    }
+  };
+
+  const computeEvaluation = () => {
+    if (!lastExperiment) {
+      setMessage("Create or load an experiment first.");
+      return;
+    }
+    if (!importedRatings?.ratings.length) {
+      setMessage("Import a filled rating sheet first.");
+      return;
+    }
+    if (!privateReveal.length) {
+      setMessage("Import the private reveal key first.");
+      return;
+    }
+    const schedule: BlindEvaluationSchedule = {
+      format: "presenter-twin-blind-schedule/1.0.0",
+      experimentId: lastExperiment.id,
+      publicEntries: privateReveal.map((reveal) => ({
+        blindId: reveal.blindId,
+        playbackAssetId:
+          lastExperiment.sourcePackages.find((source) =>
+            reveal.candidateId.startsWith(source.id),
+          )?.assetIds[0] ?? reveal.candidateId,
+      })),
+      privateReveal,
+    };
+    type RatingScores = Parameters<
+      typeof summarizeCoachedVsBaseline
+    >[0]["ratings"][number]["scores"];
+    const summary = summarizeCoachedVsBaseline({
+      schedule,
+      ratings: importedRatings.ratings.map((rating) => ({
+        evaluatorId: rating.evaluatorId,
+        blindId: rating.blindId,
+        scores: rating.scores as RatingScores,
+        preferenceReason: rating.preferenceReason,
+      })),
+    });
+    const consistency = measureEvaluatorConsistency({
+      ratings: importedRatings.ratings,
+      privateReveal,
+    });
+    const decided = summary.coachedWins + summary.baselineWins;
+    const proposal = proposePhase4Decision({
+      coachedWinRate: summary.coachedWinRate,
+      decidedComparisons: decided,
+      consistency,
+      hasAcceptableCandidate: true,
+      providerAcceptable: true,
+    });
+    const report = createPhase4GoNoGoDraft({
+      experiment: lastExperiment,
+      coachedVsBaseline: summary,
+      suggestedDecision: proposal.suggested,
+      decisionRationale: proposal.rationale,
+      openRisks: [
+        ...(consistency.pairsCompared === 0
+          ? ["No repeated-candidate consistency pairs in ratings"]
+          : []),
+        "Human must confirm final decision and usable-candidate claim",
+      ],
+    });
+    downloadJson(`${lastExperiment.id}-go-no-go-from-ratings.json`, {
+      ...report,
+      softwareSuggestion: proposal,
+      evaluatorConsistency: consistency,
+    });
+    setEvaluationSummary(
+      `Coached wins ${summary.coachedWins} · baseline ${summary.baselineWins} · ties ${summary.ties} · win rate ${(summary.coachedWinRate * 100).toFixed(0)}% · suggestion ${proposal.suggested}`,
+    );
+    setMessage(proposal.rationale);
+  };
 
   return (
     <section className="screen">
@@ -481,6 +634,66 @@ export function PresenterTwinPanel({
             </button>
           </div>
           {message && <p className="muted">{message}</p>}
+          {evaluationSummary && (
+            <p className="ready">
+              <strong>Evaluation</strong> {evaluationSummary}
+            </p>
+          )}
+
+          <h2>After generation (import)</h2>
+          <div className="train-setup">
+            <label>
+              Private reveal key (JSON)
+              <input
+                type="file"
+                accept="application/json,.json"
+                onChange={(event) =>
+                  void importReveal(event.target.files?.[0])
+                }
+              />
+            </label>
+            <label>
+              Filled rating sheet (JSON or CSV)
+              <input
+                type="file"
+                accept="application/json,.json,text/csv,.csv"
+                onChange={(event) =>
+                  void importRatings(event.target.files?.[0])
+                }
+              />
+            </label>
+            <label>
+              Candidate archive (JSON)
+              <input
+                type="file"
+                accept="application/json,.json"
+                onChange={(event) =>
+                  void importCandidateArchive(event.target.files?.[0])
+                }
+              />
+            </label>
+          </div>
+          <div className="button-row">
+            <button
+              type="button"
+              className="secondary"
+              disabled={!lastExperiment || !importedRatings || !privateReveal.length}
+              onClick={computeEvaluation}
+            >
+              Score ratings → go/no-go suggestion
+            </button>
+          </div>
+
+          <h2>Expert artifact checklist</h2>
+          <ul className="readiness-list">
+            {expertChecklist.map((item) => (
+              <li key={item.id}>
+                <strong>{item.title}</strong>
+                <span className="muted"> — {item.detail}</span>
+              </li>
+            ))}
+          </ul>
+
           <p className="muted">
             Empirical next: capture matched A–D sealed masters (CaptureCore),
             select a provider, produce candidates, run blind review, then set
