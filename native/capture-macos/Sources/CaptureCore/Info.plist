@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleExecutable</key>
+	<string>capture-core</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.sterlingdigital.capture-core</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>CaptureCore</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.1.0</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>13.0</string>
+	<key>NSCameraUsageDescription</key>
+	<string>CaptureCore records camera masters for local Camera Presence Coach sessions.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>CaptureCore records microphone masters for local Camera Presence Coach sessions.</string>
+</dict>
+</plist>
