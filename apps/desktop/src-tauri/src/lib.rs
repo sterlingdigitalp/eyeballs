@@ -4,8 +4,9 @@ mod capture_core;
 mod persistence;
 
 use capture_core::{
-    hash_session_segments, list_capture_devices, run_capture_record, scan_orphan_sessions,
-    sha256_file, CaptureRecordRequest, CaptureRunResult, SegmentHash,
+    ensure_under_sessions_root, hash_session_segments, list_capture_devices, prepare_session_dir,
+    run_capture_record, scan_orphan_sessions, sha256_file, CaptureRecordRequest, CaptureRunResult,
+    SegmentHash,
 };
 use persistence::Database;
 use serde_json::Value;
@@ -16,6 +17,8 @@ use tracing::{error, info, warn};
 
 struct AppState {
     database: Mutex<Database>,
+    /// Application Support …/sessions — CaptureCore masters are confined here.
+    sessions_dir: PathBuf,
 }
 
 #[tauri::command]
@@ -69,7 +72,8 @@ fn health(state: State<'_, AppState>) -> Result<Value, String> {
     Ok(serde_json::json!({
         "database": database.health().map_err(|error| error.to_string())?,
         "localOnly": true,
-        "schemaVersion": 1
+        "schemaVersion": 1,
+        "sessionsDir": state.sessions_dir.display().to_string(),
     }))
 }
 
@@ -94,16 +98,45 @@ fn log_event(
     }
 }
 
-/// Run CaptureCore record (prefer dryRun: true until TCC-capable host).
+/// Absolute path to app-created sessions root (CaptureCore masters).
 #[tauri::command]
-fn capture_core_record(request: CaptureRecordRequest) -> Result<CaptureRunResult, String> {
+fn capture_core_sessions_root(state: State<'_, AppState>) -> Result<String, String> {
+    Ok(state.sessions_dir.display().to_string())
+}
+
+/// Create a root-confined session directory under Application Support/sessions.
+#[tauri::command]
+fn capture_core_prepare_session(
+    state: State<'_, AppState>,
+    session_id: Option<String>,
+) -> Result<Value, String> {
+    let (id, root) = prepare_session_dir(&state.sessions_dir, session_id)?;
+    Ok(serde_json::json!({
+        "sessionId": id,
+        "sessionRoot": root.display().to_string(),
+        "sessionsRoot": state.sessions_dir.display().to_string(),
+    }))
+}
+
+/// Run CaptureCore record (prefer dryRun: true until TCC-capable host).
+/// Session root must live under the app sessions directory.
+#[tauri::command]
+fn capture_core_record(
+    state: State<'_, AppState>,
+    request: CaptureRecordRequest,
+) -> Result<CaptureRunResult, String> {
+    ensure_under_sessions_root(
+        PathBuf::from(&request.session_root).as_path(),
+        &state.sessions_dir,
+    )?;
     run_capture_record(request)
 }
 
-/// Stream SHA-256 for a single closed file path.
+/// Stream SHA-256 for a single closed file path (must be under sessions root).
 #[tauri::command]
-fn capture_core_hash_file(path: String) -> Result<SegmentHash, String> {
+fn capture_core_hash_file(state: State<'_, AppState>, path: String) -> Result<SegmentHash, String> {
     let path = PathBuf::from(path);
+    ensure_under_sessions_root(&path, &state.sessions_dir)?;
     let (sha256, byte_length) = sha256_file(&path)?;
     Ok(SegmentHash {
         path: path.display().to_string(),
@@ -114,15 +147,34 @@ fn capture_core_hash_file(path: String) -> Result<SegmentHash, String> {
 
 /// Hash all files under sessionRoot/master/segments.
 #[tauri::command]
-fn capture_core_hash_segments(session_root: String) -> Result<Vec<SegmentHash>, String> {
-    hash_session_segments(PathBuf::from(session_root).as_path())
+fn capture_core_hash_segments(
+    state: State<'_, AppState>,
+    session_root: String,
+) -> Result<Vec<SegmentHash>, String> {
+    let root = PathBuf::from(session_root);
+    ensure_under_sessions_root(&root, &state.sessions_dir)?;
+    hash_session_segments(root.as_path())
 }
 
-/// List incomplete session dirs under app data sessions root (or provided path).
+/// List incomplete session dirs. Empty `sessionsRoot` uses the app default.
 #[tauri::command]
-fn capture_core_scan_orphans(sessions_root: String) -> Result<Value, String> {
-    let orphans = scan_orphan_sessions(PathBuf::from(sessions_root).as_path())?;
-    Ok(serde_json::json!({ "orphans": orphans }))
+fn capture_core_scan_orphans(
+    state: State<'_, AppState>,
+    sessions_root: Option<String>,
+) -> Result<Value, String> {
+    let root = match sessions_root {
+        Some(path) if !path.trim().is_empty() => {
+            let p = PathBuf::from(path);
+            ensure_under_sessions_root(&p, &state.sessions_dir)?;
+            p
+        }
+        _ => state.sessions_dir.clone(),
+    };
+    let orphans = scan_orphan_sessions(root.as_path())?;
+    Ok(serde_json::json!({
+        "sessionsRoot": root.display().to_string(),
+        "orphans": orphans,
+    }))
 }
 
 /// AVFoundation device inventory via capture-core list-devices.
@@ -148,8 +200,17 @@ pub fn run() {
                 .try_init()
                 .ok();
             let database = Database::open(data_dir.join("presence.sqlite3"))?;
+            // Startup orphan scan (log only — UI can re-query).
+            match scan_orphan_sessions(&sessions_dir) {
+                Ok(orphans) if !orphans.is_empty() => {
+                    warn!(count = orphans.len(), "capture_core_orphans_at_startup");
+                }
+                Ok(_) => info!("capture_core_no_orphans_at_startup"),
+                Err(error) => warn!(%error, "capture_core_orphan_scan_failed"),
+            }
             app.manage(AppState {
                 database: Mutex::new(database),
+                sessions_dir: sessions_dir.clone(),
             });
             info!(sessions = %sessions_dir.display(), "application_initialized");
             Ok(())
@@ -160,6 +221,8 @@ pub fn run() {
             list_json,
             health,
             log_event,
+            capture_core_sessions_root,
+            capture_core_prepare_session,
             capture_core_record,
             capture_core_hash_file,
             capture_core_hash_segments,

@@ -172,6 +172,72 @@ export function buildCaptureCoreRecordRequest(input: {
   });
 }
 
+function normalizeDeviceLabel(value: string): string {
+  return value.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+/**
+ * Match a webview/profile label to an AVFoundation device by stable uniqueId
+ * (if already bound) or localized name (exact, then unique substring).
+ */
+export function matchAvFoundationDevice(
+  label: string,
+  devices: CaptureCoreDeviceOut[],
+  preferredUniqueId?: string,
+): CaptureCoreDeviceOut | undefined {
+  if (preferredUniqueId) {
+    const byId = devices.find((device) => device.uniqueId === preferredUniqueId);
+    if (byId) return byId;
+  }
+  const needle = normalizeDeviceLabel(label);
+  if (!needle) return undefined;
+  const exact = devices.filter((device) => normalizeDeviceLabel(device.name) === needle);
+  if (exact.length === 1) return exact[0];
+  if (exact.length > 1) return undefined;
+  const partial = devices.filter((device) => {
+    const name = normalizeDeviceLabel(device.name);
+    return name.includes(needle) || needle.includes(name);
+  });
+  return partial.length === 1 ? partial[0] : undefined;
+}
+
+/**
+ * Fill `deviceBindings` from CaptureCore list-devices inventory using profile labels.
+ * Does not invent IDs when the match is ambiguous.
+ */
+export function reconcileDeviceBindings(
+  profile: CaptureProfile,
+  inventory: CaptureCoreDeviceInventory,
+): CaptureProfile {
+  const prev = profile.deviceBindings ?? {};
+  const camera = matchAvFoundationDevice(
+    profile.cameraLabel || profile.cameraDeviceId,
+    inventory.cameras,
+    prev.avFoundationCameraId,
+  );
+  const microphone = matchAvFoundationDevice(
+    profile.microphoneLabel || profile.microphoneDeviceId,
+    inventory.microphones,
+    prev.avFoundationMicrophoneId,
+  );
+  const deviceBindings = {
+    webviewCameraId: prev.webviewCameraId ?? profile.cameraDeviceId,
+    webviewMicrophoneId: prev.webviewMicrophoneId ?? profile.microphoneDeviceId,
+    avFoundationCameraId: camera?.uniqueId ?? prev.avFoundationCameraId,
+    avFoundationMicrophoneId: microphone?.uniqueId ?? prev.avFoundationMicrophoneId,
+  };
+  return {
+    ...profile,
+    deviceBindings,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+export function shortSha256(hex: string, head = 8): string {
+  if (hex.length <= head * 2 + 1) return hex;
+  return `${hex.slice(0, head)}…${hex.slice(-head)}`;
+}
+
 export const featureVectorSchema = z.object({
   schemaVersion: z.literal("1.0.0"),
   timestampUs: z.number().int().nonnegative(),

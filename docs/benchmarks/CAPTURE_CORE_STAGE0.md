@@ -77,9 +77,19 @@ Expect: `state starting → recording → segment_finalized → recording_finish
 | TS client `apps/desktop/src/lib/capture-core.ts` | Invoke wrappers |
 | `scripts/dev/test-capture-core-dry-run.sh` | Protocol + on-disk seal smoke |
 
+## Software progress (continued)
+
+| Item | Status |
+|---|---|
+| App-confined `sessions/` + `prepare_session` | Tauri commands |
+| Path confinement on record/hash/orphan | Rejects roots outside app sessions |
+| Startup orphan scan (log) | `lib.rs` setup |
+| `reconcileDeviceBindings` by name | Contracts + tests |
+| Dataset page dry-run UI | `CaptureCorePanel` + nav |
+
 ## Next (Stage 2–4)
 
 1. Human/Terminal Stage 0 hardware matrix (Brio 4K/30, Yeti, kill, clean stop).  
 2. Harden writers after first successful live take (PCM audio, segment rotation under load).  
-3. Wire Dataset UI button → `captureCoreDryRun` / `captureCoreRecord` (needs sessions dir + stop webview camera).  
+3. Live record from Dataset (post–Stage 0) with explicit duration + stop.  
 4. Package capture-core as Tauri externalBin sidecar for release builds.

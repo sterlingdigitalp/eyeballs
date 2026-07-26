@@ -71,6 +71,7 @@ import {
   type CalibrationProtocolStep,
 } from "./lib/calibration-protocol";
 import { logEvent } from "./lib/logging";
+import { CaptureCorePanel } from "./components/CaptureCorePanel";
 import {
   MEDIAPIPE_TRACKER_ID,
   MEDIAPIPE_TRACKER_VERSION,
@@ -83,7 +84,7 @@ import {
 } from "./tracking/provider";
 import "./styles.css";
 
-type Page = "setup" | "calibrate" | "measure" | "review";
+type Page = "setup" | "calibrate" | "measure" | "review" | "dataset";
 const NO_MICROPHONE_ID = "__none__";
 const SESSION_CHECKPOINT_INTERVAL_US = 5_000_000;
 const VIDEO_MODE_OPTIONS: Array<{
@@ -2300,12 +2301,29 @@ export default function App() {
     }
   };
 
+  /** Dataset / CaptureCore must not share the camera with the practice webview path. */
+  const releaseMediaForDataset = useCallback(() => {
+    stopMediaStream(cameraStreamRef.current);
+    stopMediaStream(microphoneStreamRef.current);
+    cameraStreamRef.current = undefined;
+    microphoneStreamRef.current = undefined;
+    setCameraStream(undefined);
+    setMicrophoneStream(undefined);
+  }, []);
+
+  const patchProfile = useCallback(async (updated: CaptureProfile) => {
+    await store.profiles.put(updated);
+    setProfiles((values) =>
+      values.map((profile) => (profile.id === updated.id ? updated : profile)),
+    );
+  }, []);
+
   return (
     <main>
       <header className="app-header">
         <a className="brand" href="#" onClick={() => setPage("setup")}><span>●</span> Presence</a>
         <nav aria-label="Primary">
-          {(["setup", "calibrate", "measure", "review"] as Page[]).map((item) => (
+          {(["setup", "calibrate", "measure", "dataset", "review"] as Page[]).map((item) => (
             <button className={page === item ? "active" : ""} key={item} onClick={() => setPage(item)}>
               {item === "measure" ? "Test" : item[0].toUpperCase() + item.slice(1)}
             </button>
@@ -2365,6 +2383,13 @@ export default function App() {
           onSession={upsertSession}
           debug={debug}
           calibrationIssue={calibrationIssue}
+        />
+      )}
+      {page === "dataset" && (
+        <CaptureCorePanel
+          profile={activeProfile}
+          onReleaseMedia={releaseMediaForDataset}
+          onProfilePatched={patchProfile}
         />
       )}
       {page === "review" && (

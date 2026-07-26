@@ -325,6 +325,81 @@ pub fn run_capture_record(request: CaptureRecordRequest) -> Result<CaptureRunRes
     }
 }
 
+/// True when `candidate` resolves inside `root` (after canonicalize).
+pub fn path_is_under_root(candidate: &Path, root: &Path) -> Result<bool, String> {
+    let root = fs::canonicalize(root).map_err(|e| format!("canonicalize root: {e}"))?;
+    if candidate.exists() {
+        let cand = fs::canonicalize(candidate).map_err(|e| format!("canonicalize path: {e}"))?;
+        return Ok(cand.starts_with(&root));
+    }
+    // Not yet on disk: require absolute path whose parent chain is under root.
+    let mut cursor = candidate.to_path_buf();
+    while !cursor.exists() {
+        match cursor.parent() {
+            Some(parent) if parent != cursor => cursor = parent.to_path_buf(),
+            _ => return Ok(false),
+        }
+    }
+    let existing = fs::canonicalize(&cursor).map_err(|e| e.to_string())?;
+    if !existing.starts_with(&root) {
+        return Ok(false);
+    }
+    // Remaining components must not escape via `..`
+    let suffix = candidate.strip_prefix(&cursor).unwrap_or(candidate);
+    Ok(!suffix
+        .components()
+        .any(|c| matches!(c, std::path::Component::ParentDir)))
+}
+
+pub fn ensure_under_sessions_root(session_root: &Path, sessions_root: &Path) -> Result<(), String> {
+    if path_is_under_root(session_root, sessions_root)? {
+        return Ok(());
+    }
+    Err(format!(
+        "session root must be under app sessions directory ({})",
+        sessions_root.display()
+    ))
+}
+
+/// Sanitize session id for a single path component (no traversal).
+pub fn sanitize_session_id(raw: &str) -> Result<String, String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() || trimmed.len() > 128 {
+        return Err("session id must be 1–128 characters".into());
+    }
+    if !trimmed
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
+        return Err("session id may only contain A–Z, a–z, 0–9, -, _".into());
+    }
+    Ok(trimmed.to_string())
+}
+
+/// Create `sessions_root/<sessionId>/master/segments` for a new recording.
+pub fn prepare_session_dir(
+    sessions_root: &Path,
+    session_id: Option<String>,
+) -> Result<(String, PathBuf), String> {
+    fs::create_dir_all(sessions_root).map_err(|e| format!("create sessions root: {e}"))?;
+    let id = match session_id {
+        Some(raw) => sanitize_session_id(&raw)?,
+        None => uuid::Uuid::new_v4().to_string(),
+    };
+    let session_root = sessions_root.join(&id);
+    if session_root.exists() {
+        // Allow reusing empty prepared dirs; reject non-empty unexpected content later at record time.
+        if !session_root.is_dir() {
+            return Err(format!("session path exists and is not a directory: {id}"));
+        }
+    }
+    fs::create_dir_all(session_root.join("master").join("segments"))
+        .map_err(|e| format!("create session dir: {e}"))?;
+    ensure_under_sessions_root(&session_root, sessions_root)?;
+    let canonical = fs::canonicalize(&session_root).map_err(|e| e.to_string())?;
+    Ok((id, canonical))
+}
+
 /// Scan session roots for incomplete segment dirs (orphan detection helper).
 pub fn scan_orphan_sessions(sessions_root: &Path) -> Result<Vec<Value>, String> {
     if !sessions_root.is_dir() {
@@ -344,6 +419,7 @@ pub fn scan_orphan_sessions(sessions_root: &Path) -> Result<Vec<Value>, String> 
             let hashes = hash_session_segments(&path).unwrap_or_default();
             orphans.push(json!({
                 "sessionRoot": path.display().to_string(),
+                "sessionId": path.file_name().and_then(|s| s.to_str()).unwrap_or(""),
                 "protocolVersion": PROTOCOL_VERSION,
                 "segmentCount": hashes.len(),
                 "segmentHashes": hashes,
@@ -413,6 +489,25 @@ mod tests {
             .as_str()
             .unwrap()
             .contains("orphan-session"));
+    }
+
+    #[test]
+    fn sanitize_session_id_rejects_traversal() {
+        assert!(sanitize_session_id("../etc").is_err());
+        assert!(sanitize_session_id("a/b").is_err());
+        assert_eq!(sanitize_session_id("abc-123_X").unwrap(), "abc-123_X");
+    }
+
+    #[test]
+    fn prepare_session_dir_is_under_root() {
+        let root = tempfile::tempdir().unwrap();
+        let (id, path) = prepare_session_dir(root.path(), Some("sess_1".into())).unwrap();
+        assert_eq!(id, "sess_1");
+        assert!(path.starts_with(fs::canonicalize(root.path()).unwrap()));
+        assert!(path.join("master").join("segments").is_dir());
+        assert!(ensure_under_sessions_root(&path, root.path()).is_ok());
+        let outside = tempfile::tempdir().unwrap();
+        assert!(ensure_under_sessions_root(outside.path(), root.path()).is_err());
     }
 
     #[test]
