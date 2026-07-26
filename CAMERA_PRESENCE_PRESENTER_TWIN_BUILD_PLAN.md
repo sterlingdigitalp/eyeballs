@@ -2846,6 +2846,23 @@ Software added after the initial contracts (same day continuum):
 - CaptureCore Stage 6 soak hash authorities accepted on seal ingest;
 - on-screen empirical capture checklist.
 
+Phase 4 evaluation hardening added after the first artifact workflow:
+
+- imported candidate archives must have a valid content SHA-256, confined unique
+  playback paths, unique media hashes, measured duration, all four A–D
+  conditions, and matching provider/version lineage for generated conditions;
+- blind schedules are now built from verified generated/archive outputs rather
+  than accidentally pointing evaluators at source masters;
+- exported CSV rating sheets deliberately leave scores blank instead of
+  pre-filling neutral values that could bias or masquerade as completed review;
+- every represented evaluator must rate every scheduled blind candidate exactly
+  once; unknown, duplicate, and selectively omitted blind IDs are rejected;
+- a software `go` suggestion is impossible until a human identifies an
+  acceptable 10–60 second candidate, accepts the provider's data-control/rights
+  posture, and confirms expert frame-by-frame artifact review;
+- evaluation artifacts persist the candidate archive hash, human gate evidence,
+  evaluator consistency, and open risks alongside the statistical suggestion.
+
 ### 14.3 Experimental conditions
 
 Create at least four source conditions:

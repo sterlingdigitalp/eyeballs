@@ -13,6 +13,8 @@ import {
   evaluationDimensions,
   phase4SourcePackageSchema,
   presenterTwinConditions,
+  type BlindEvaluationSchedule,
+  type Phase4Candidate,
   type Phase4SourcePackage,
   type PresenterTwinCondition,
   type PresenterTwinExperiment,
@@ -27,8 +29,18 @@ export const PHASE4_RATING_SHEET_FORMAT =
 export const phase4CandidateArchiveEntrySchema = z.object({
   candidateId: z.string().min(1),
   condition: z.enum(presenterTwinConditions),
-  playbackRelativePath: z.string().min(1),
+  playbackRelativePath: z
+    .string()
+    .min(1)
+    .refine(
+      (value) =>
+        !value.startsWith("/") &&
+        !value.includes("\\") &&
+        !value.split("/").some((part) => part === "." || part === ".."),
+      "candidate playback path must be a confined relative path",
+    ),
   sha256: z.string().regex(/^[a-f0-9]{64}$/i),
+  durationSec: z.number().positive().max(600),
   providerId: z.string().min(1).optional(),
   providerVersion: z.string().min(1).optional(),
   seed: z.number().nullable().optional(),
@@ -38,13 +50,45 @@ export type Phase4CandidateArchiveEntry = z.infer<
   typeof phase4CandidateArchiveEntrySchema
 >;
 
-export const phase4CandidateArchiveSchema = z.object({
-  format: z.literal(PHASE4_CANDIDATE_ARCHIVE_FORMAT),
-  experimentId: z.string().min(1),
-  createdAt: z.string().datetime({ offset: true }),
-  entries: z.array(phase4CandidateArchiveEntrySchema).min(1),
-  archiveManifestSha256: z.string().regex(/^[a-f0-9]{64}$/i).optional(),
-});
+export const phase4CandidateArchiveSchema = z
+  .object({
+    format: z.literal(PHASE4_CANDIDATE_ARCHIVE_FORMAT),
+    experimentId: z.string().min(1),
+    createdAt: z.string().datetime({ offset: true }),
+    entries: z.array(phase4CandidateArchiveEntrySchema).min(1),
+    archiveManifestSha256: z.string().regex(/^[a-f0-9]{64}$/i).optional(),
+  })
+  .superRefine((archive, context) => {
+    const ids = new Set<string>();
+    const paths = new Set<string>();
+    const hashes = new Set<string>();
+    for (const [index, entry] of archive.entries.entries()) {
+      if (ids.has(entry.candidateId)) {
+        context.addIssue({
+          code: "custom",
+          path: ["entries", index, "candidateId"],
+          message: "candidate IDs must be unique",
+        });
+      }
+      if (paths.has(entry.playbackRelativePath)) {
+        context.addIssue({
+          code: "custom",
+          path: ["entries", index, "playbackRelativePath"],
+          message: "candidate playback paths must be unique",
+        });
+      }
+      if (hashes.has(entry.sha256.toLowerCase())) {
+        context.addIssue({
+          code: "custom",
+          path: ["entries", index, "sha256"],
+          message: "candidate content hashes must be unique",
+        });
+      }
+      ids.add(entry.candidateId);
+      paths.add(entry.playbackRelativePath);
+      hashes.add(entry.sha256.toLowerCase());
+    }
+  });
 export type Phase4CandidateArchive = z.infer<typeof phase4CandidateArchiveSchema>;
 
 export async function sealCandidateArchive(
@@ -64,6 +108,61 @@ export async function sealCandidateArchive(
     new TextEncoder().encode(stableStringify(body)),
   );
   return phase4CandidateArchiveSchema.parse({ ...body, archiveManifestSha256 });
+}
+
+/**
+ * Verify that an imported candidate archive is content-addressed, belongs to
+ * the selected experiment, covers A–D, and cannot silently substitute a
+ * different provider for generated Conditions A–C.
+ */
+export async function verifyCandidateArchive(args: {
+  archive: unknown;
+  experiment: PresenterTwinExperiment;
+}): Promise<Phase4CandidateArchive> {
+  const archive = phase4CandidateArchiveSchema.parse(args.archive);
+  if (archive.experimentId !== args.experiment.id) {
+    throw new Error("Candidate archive experimentId does not match experiment");
+  }
+  if (!archive.archiveManifestSha256) {
+    throw new Error("Candidate archive must include its content SHA-256");
+  }
+  const resealed = await sealCandidateArchive({
+    experimentId: archive.experimentId,
+    createdAt: archive.createdAt,
+    entries: archive.entries,
+  });
+  if (resealed.archiveManifestSha256 !== archive.archiveManifestSha256) {
+    throw new Error("Candidate archive content SHA-256 does not match");
+  }
+  for (const condition of presenterTwinConditions) {
+    if (!archive.entries.some((entry) => entry.condition === condition)) {
+      throw new Error(`Candidate archive is missing condition ${condition}`);
+    }
+  }
+  for (const entry of archive.entries) {
+    if (entry.condition === "real_reference") continue;
+    if (
+      entry.providerId !== args.experiment.provider.providerId ||
+      entry.providerVersion !== args.experiment.provider.providerVersion
+    ) {
+      throw new Error(
+        `Candidate ${entry.candidateId} provider lineage does not match experiment`,
+      );
+    }
+  }
+  return archive;
+}
+
+export function phase4CandidatesFromArchive(
+  archive: Phase4CandidateArchive,
+): Phase4Candidate[] {
+  return phase4CandidateArchiveSchema.parse(archive).entries.map((entry) => ({
+    id: entry.candidateId,
+    condition: entry.condition,
+    playbackAssetId: entry.playbackRelativePath,
+    providerId: entry.providerId,
+    providerVersion: entry.providerVersion,
+  }));
 }
 
 const scoreRecordSchema = z.record(
@@ -132,6 +231,29 @@ export function ratingSheetToCsv(sheet: Phase4RatingSheet): string {
     ),
     JSON.stringify(rating.preferenceReason ?? ""),
     rating.ratedAt ?? "",
+  ]);
+  return [header.join(","), ...rows.map((row) => row.join(","))].join("\n");
+}
+
+/** CSV template with deliberately blank scores; neutral defaults bias results. */
+export function blankRatingSheetCsv(args: {
+  blindIds: string[];
+  evaluatorId?: string;
+}): string {
+  const header = [
+    "evaluatorId",
+    "blindId",
+    ...evaluationDimensions,
+    "preferenceReason",
+    "ratedAt",
+  ];
+  const evaluatorId = args.evaluatorId ?? "evaluator-1";
+  const rows = args.blindIds.map((blindId) => [
+    evaluatorId,
+    blindId,
+    ...evaluationDimensions.map(() => ""),
+    "",
+    "",
   ]);
   return [header.join(","), ...rows.map((row) => row.join(","))].join("\n");
 }
@@ -320,6 +442,52 @@ export function attachCandidateArchiveToExperimentNotes(args: {
 /** Parse a rating sheet JSON blob (exported template or filled returns). */
 export function parseRatingSheet(raw: unknown): Phase4RatingSheet {
   return phase4RatingSheetSchema.parse(raw);
+}
+
+/**
+ * Reject selective or ambiguous evaluation input. Every evaluator represented
+ * in a sheet must rate every scheduled blind entry exactly once.
+ */
+export function validateRatingSheetForSchedule(args: {
+  sheet: Phase4RatingSheet;
+  schedule: BlindEvaluationSchedule;
+}): Phase4RatingSheet {
+  const sheet = phase4RatingSheetSchema.parse(args.sheet);
+  if (sheet.experimentId !== args.schedule.experimentId) {
+    throw new Error("Rating sheet experiment does not match blind schedule");
+  }
+  if (!sheet.ratings.length) {
+    throw new Error("Rating sheet contains no completed ratings");
+  }
+  const blindIds = new Set(
+    args.schedule.publicEntries.map((entry) => entry.blindId),
+  );
+  if (blindIds.size !== args.schedule.publicEntries.length) {
+    throw new Error("Blind schedule contains duplicate IDs");
+  }
+  const byEvaluator = new Map<string, Set<string>>();
+  for (const rating of sheet.ratings) {
+    if (!blindIds.has(rating.blindId)) {
+      throw new Error(`Rating references unknown blind ID ${rating.blindId}`);
+    }
+    const rated = byEvaluator.get(rating.evaluatorId) ?? new Set<string>();
+    if (rated.has(rating.blindId)) {
+      throw new Error(
+        `Evaluator ${rating.evaluatorId} rated ${rating.blindId} more than once`,
+      );
+    }
+    rated.add(rating.blindId);
+    byEvaluator.set(rating.evaluatorId, rated);
+  }
+  for (const [evaluatorId, rated] of byEvaluator) {
+    if (rated.size !== blindIds.size) {
+      const missing = [...blindIds].filter((blindId) => !rated.has(blindId));
+      throw new Error(
+        `Evaluator ${evaluatorId} is missing ${missing.join(", ")}`,
+      );
+    }
+  }
+  return sheet;
 }
 
 /**
@@ -517,6 +685,7 @@ export function proposePhase4Decision(args: {
   consistency?: EvaluatorConsistencyReport;
   hasAcceptableCandidate?: boolean;
   providerAcceptable?: boolean;
+  expertReviewComplete?: boolean;
 }): {
   suggested: "go" | "no_go" | "inconclusive" | "pending";
   rationale: string;
@@ -547,6 +716,17 @@ export function proposePhase4Decision(args: {
     return {
       suggested: "no_go",
       rationale: "Provider data-control or rights posture is unacceptable.",
+    };
+  }
+  if (
+    args.hasAcceptableCandidate === undefined ||
+    args.providerAcceptable === undefined ||
+    args.expertReviewComplete !== true
+  ) {
+    return {
+      suggested: "pending",
+      rationale:
+        "Human candidate acceptability, provider policy, and expert artifact review gates must all be completed.",
     };
   }
   // Plan: clear majority for coached over baseline

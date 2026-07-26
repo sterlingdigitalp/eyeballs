@@ -6,24 +6,26 @@ import type {
 import {
   attachCandidateArchiveToExperimentNotes,
   auditPresenterTwinReadiness,
+  blankRatingSheetCsv,
   buildBlindEvaluationSchedule,
   createPhase4GoNoGoDraft,
   createPresenterTwinExperiment,
-  emptyRatingSheet,
   expertArtifactChecklist,
   measureEvaluatorConsistency,
   parseRatingSheet,
   parseRatingSheetCsv,
-  phase4CandidateArchiveSchema,
+  phase4CandidatesFromArchive,
   phase4CaptureChecklist,
   proposePhase4Decision,
   publicBlindScheduleArtifact,
   phase4ProviderRequirementsSchema,
-  ratingSheetToCsv,
   sha256Hex,
   summarizeCoachedVsBaseline,
+  validateRatingSheetForSchedule,
+  verifyCandidateArchive,
   type BlindEvaluationSchedule,
   type DatasetVersionManifest,
+  type Phase4CandidateArchive,
   type Phase4RatingSheet,
   type Phase4SourcePackage,
   type PresenterTwinExperiment,
@@ -89,6 +91,14 @@ function downloadExperiment(experiment: PresenterTwinExperiment): void {
   downloadJson(`${experiment.id}-go-no-go-draft.json`, draft);
 }
 
+function archiveBoundKey(
+  kind: "presenterTwinBlindSchedule" | "presenterTwinRatings",
+  experimentId: string,
+  archiveManifestSha256: string,
+): string {
+  return `${kind}:${experimentId}:${archiveManifestSha256}`;
+}
+
 export function PresenterTwinPanel({
   sessions,
   clips,
@@ -113,8 +123,17 @@ export function PresenterTwinPanel({
   const [privateReveal, setPrivateReveal] = useState<
     BlindEvaluationSchedule["privateReveal"]
   >([]);
+  const [blindSchedule, setBlindSchedule] =
+    useState<BlindEvaluationSchedule>();
+  const [candidateArchive, setCandidateArchive] =
+    useState<Phase4CandidateArchive>();
   const [importedRatings, setImportedRatings] = useState<Phase4RatingSheet>();
   const [evaluationSummary, setEvaluationSummary] = useState<string>();
+  const [acceptableCandidate, setAcceptableCandidate] =
+    useState("__unreviewed__");
+  const [providerDisposition, setProviderDisposition] =
+    useState("__unreviewed__");
+  const [expertReviewComplete, setExpertReviewComplete] = useState(false);
 
   useEffect(() => {
     void store.datasetVersions.all().then((raw) => {
@@ -126,6 +145,57 @@ export function PresenterTwinPanel({
         if (existing?.[0]) setLastExperiment(existing[0]);
       });
   }, []);
+
+  useEffect(() => {
+    if (!lastExperiment) return;
+    void store.settings
+      .get<Phase4CandidateArchive>(
+        `presenterTwinCandidates:${lastExperiment.id}`,
+      )
+      .then(async (archive) => {
+        try {
+          const verifiedArchive = archive
+            ? await verifyCandidateArchive({
+                archive,
+                experiment: lastExperiment,
+              })
+            : undefined;
+          if (!verifiedArchive?.archiveManifestSha256) return;
+          setCandidateArchive(verifiedArchive);
+          const [ratings, schedule] = await Promise.all([
+            store.settings.get<Phase4RatingSheet>(
+              archiveBoundKey(
+                "presenterTwinRatings",
+                lastExperiment.id,
+                verifiedArchive.archiveManifestSha256,
+              ),
+            ),
+            store.settings.get<BlindEvaluationSchedule>(
+              archiveBoundKey(
+                "presenterTwinBlindSchedule",
+                lastExperiment.id,
+                verifiedArchive.archiveManifestSha256,
+              ),
+            ),
+          ]);
+          if (ratings && schedule) {
+            setImportedRatings(
+              validateRatingSheetForSchedule({ sheet: ratings, schedule }),
+            );
+          }
+          if (schedule) {
+            setBlindSchedule(schedule);
+            setPrivateReveal(schedule.privateReveal);
+          }
+        } catch (cause) {
+          setMessage(
+            `Saved Phase 4 evaluation state was rejected: ${
+              cause instanceof Error ? cause.message : String(cause)
+            }`,
+          );
+        }
+      });
+  }, [lastExperiment]);
 
   useEffect(() => {
     let active = true;
@@ -304,15 +374,52 @@ export function PresenterTwinPanel({
   const expertChecklist = expertArtifactChecklist();
 
   const importReveal = async (file: File | undefined) => {
-    if (!file) return;
+    if (!file || !lastExperiment || !candidateArchive) return;
     try {
       const raw = JSON.parse(await file.text()) as {
+        experimentId?: string;
         privateReveal?: BlindEvaluationSchedule["privateReveal"];
       };
+      if (raw.experimentId !== lastExperiment.id) {
+        throw new Error("Private reveal does not match the active experiment");
+      }
       if (!raw.privateReveal?.length) {
         throw new Error("File missing privateReveal array");
       }
+      const candidates = new Map(
+        phase4CandidatesFromArchive(candidateArchive).map((candidate) => [
+          candidate.id,
+          candidate,
+        ]),
+      );
+      const publicEntries = raw.privateReveal.map((entry) => {
+        const candidate = candidates.get(entry.candidateId);
+        if (!candidate) {
+          throw new Error(
+            `Private reveal references unknown candidate ${entry.candidateId}`,
+          );
+        }
+        return {
+          blindId: entry.blindId,
+          playbackAssetId: candidate.playbackAssetId,
+        };
+      });
+      const schedule: BlindEvaluationSchedule = {
+        format: "presenter-twin-blind-schedule/1.0.0",
+        experimentId: lastExperiment.id,
+        publicEntries,
+        privateReveal: raw.privateReveal,
+      };
       setPrivateReveal(raw.privateReveal);
+      setBlindSchedule(schedule);
+      await store.settings.put(
+        archiveBoundKey(
+          "presenterTwinBlindSchedule",
+          lastExperiment.id,
+          candidateArchive.archiveManifestSha256!,
+        ),
+        schedule,
+      );
       setMessage(
         `Loaded private reveal with ${raw.privateReveal.length} entries — keep offline.`,
       );
@@ -322,7 +429,7 @@ export function PresenterTwinPanel({
   };
 
   const importRatings = async (file: File | undefined) => {
-    if (!file || !lastExperiment) return;
+    if (!file || !lastExperiment || !candidateArchive || !blindSchedule) return;
     try {
       const text = await file.text();
       const sheet = file.name.endsWith(".csv")
@@ -333,13 +440,21 @@ export function PresenterTwinPanel({
           `Rating sheet experiment ${sheet.experimentId} does not match ${lastExperiment.id}`,
         );
       }
-      setImportedRatings(sheet);
-      await store.settings.put(
-        `presenterTwinRatings:${lastExperiment.id}`,
+      const validated = validateRatingSheetForSchedule({
         sheet,
+        schedule: blindSchedule,
+      });
+      setImportedRatings(validated);
+      await store.settings.put(
+        archiveBoundKey(
+          "presenterTwinRatings",
+          lastExperiment.id,
+          candidateArchive.archiveManifestSha256!,
+        ),
+        validated,
       );
       setMessage(
-        `Imported ${sheet.ratings.length} ratings for ${lastExperiment.id.slice(0, 18)}…`,
+        `Imported ${validated.ratings.length} complete blind ratings for ${lastExperiment.id.slice(0, 18)}…`,
       );
     } catch (cause) {
       setMessage(cause instanceof Error ? cause.message : String(cause));
@@ -349,9 +464,10 @@ export function PresenterTwinPanel({
   const importCandidateArchive = async (file: File | undefined) => {
     if (!file || !lastExperiment) return;
     try {
-      const archive = phase4CandidateArchiveSchema.parse(
-        JSON.parse(await file.text()),
-      );
+      const archive = await verifyCandidateArchive({
+        archive: JSON.parse(await file.text()),
+        experiment: lastExperiment,
+      });
       const note = attachCandidateArchiveToExperimentNotes({
         experiment: lastExperiment,
         archive,
@@ -360,15 +476,20 @@ export function PresenterTwinPanel({
         `presenterTwinCandidates:${lastExperiment.id}`,
         archive,
       );
+      setCandidateArchive(archive);
+      setBlindSchedule(undefined);
+      setPrivateReveal([]);
+      setImportedRatings(undefined);
+      setAcceptableCandidate("__unreviewed__");
       setMessage(
-        `Candidate archive attached · ${note.candidateCount} entries · hash ${note.archiveManifestSha256?.slice(0, 12) ?? "n/a"}…`,
+        `Verified candidate archive attached · ${note.candidateCount} entries · hash ${note.archiveManifestSha256?.slice(0, 12) ?? "n/a"}…`,
       );
     } catch (cause) {
       setMessage(cause instanceof Error ? cause.message : String(cause));
     }
   };
 
-  const computeEvaluation = () => {
+  const computeEvaluation = async () => {
     if (!lastExperiment) {
       setMessage("Create or load an experiment first.");
       return;
@@ -377,27 +498,15 @@ export function PresenterTwinPanel({
       setMessage("Import a filled rating sheet first.");
       return;
     }
-    if (!privateReveal.length) {
+    if (!blindSchedule || !privateReveal.length) {
       setMessage("Import the private reveal key first.");
       return;
     }
-    const schedule: BlindEvaluationSchedule = {
-      format: "presenter-twin-blind-schedule/1.0.0",
-      experimentId: lastExperiment.id,
-      publicEntries: privateReveal.map((reveal) => ({
-        blindId: reveal.blindId,
-        playbackAssetId:
-          lastExperiment.sourcePackages.find((source) =>
-            reveal.candidateId.startsWith(source.id),
-          )?.assetIds[0] ?? reveal.candidateId,
-      })),
-      privateReveal,
-    };
     type RatingScores = Parameters<
       typeof summarizeCoachedVsBaseline
     >[0]["ratings"][number]["scores"];
     const summary = summarizeCoachedVsBaseline({
-      schedule,
+      schedule: blindSchedule,
       ratings: importedRatings.ratings.map((rating) => ({
         evaluatorId: rating.evaluatorId,
         blindId: rating.blindId,
@@ -414,8 +523,15 @@ export function PresenterTwinPanel({
       coachedWinRate: summary.coachedWinRate,
       decidedComparisons: decided,
       consistency,
-      hasAcceptableCandidate: true,
-      providerAcceptable: true,
+      hasAcceptableCandidate:
+        acceptableCandidate === "__unreviewed__"
+          ? undefined
+          : acceptableCandidate !== "__none__",
+      providerAcceptable:
+        providerDisposition === "__unreviewed__"
+          ? undefined
+          : providerDisposition === "acceptable",
+      expertReviewComplete,
     });
     const report = createPhase4GoNoGoDraft({
       experiment: lastExperiment,
@@ -426,14 +542,54 @@ export function PresenterTwinPanel({
         ...(consistency.pairsCompared === 0
           ? ["No repeated-candidate consistency pairs in ratings"]
           : []),
-        "Human must confirm final decision and usable-candidate claim",
+        ...(acceptableCandidate === "__unreviewed__"
+          ? ["Candidate usability has not been reviewed"]
+          : acceptableCandidate === "__none__"
+            ? ["No candidate is acceptable for the intended use case"]
+            : []),
+        ...(providerDisposition === "__unreviewed__"
+          ? ["Provider policy has not been accepted or rejected"]
+          : providerDisposition === "unacceptable"
+            ? ["Provider data-control or rights posture is unacceptable"]
+            : []),
+        ...(!expertReviewComplete
+          ? ["Expert frame-by-frame artifact review is incomplete"]
+          : []),
+        "Human must confirm the final published decision",
       ],
     });
-    downloadJson(`${lastExperiment.id}-go-no-go-from-ratings.json`, {
+    const humanGateEvidence = {
+      reviewedAt: new Date().toISOString(),
+      acceptableCandidateId:
+        acceptableCandidate.startsWith("__") ? null : acceptableCandidate,
+      candidateDisposition:
+        acceptableCandidate === "__unreviewed__"
+          ? "unreviewed"
+          : acceptableCandidate === "__none__"
+            ? "none_acceptable"
+            : "acceptable",
+      providerDisposition:
+        providerDisposition === "__unreviewed__"
+          ? "unreviewed"
+          : providerDisposition,
+      expertReviewComplete,
+    };
+    const resultArtifact = {
       ...report,
       softwareSuggestion: proposal,
       evaluatorConsistency: consistency,
-    });
+      candidateArchiveManifestSha256:
+        candidateArchive?.archiveManifestSha256,
+      humanGateEvidence,
+    };
+    await store.settings.put(
+      `presenterTwinEvaluation:${lastExperiment.id}`,
+      resultArtifact,
+    );
+    downloadJson(
+      `${lastExperiment.id}-go-no-go-from-ratings.json`,
+      resultArtifact,
+    );
     setEvaluationSummary(
       `Coached wins ${summary.coachedWins} · baseline ${summary.baselineWins} · ties ${summary.ties} · win rate ${(summary.coachedWinRate * 100).toFixed(0)}% · suggestion ${proposal.suggested}`,
     );
@@ -586,20 +742,24 @@ export function PresenterTwinPanel({
             <button
               type="button"
               className="secondary"
-              disabled={!lastExperiment}
+              disabled={!lastExperiment || !candidateArchive}
               onClick={() => {
-                if (!lastExperiment) return;
+                if (!lastExperiment || !candidateArchive) return;
                 const schedule = buildBlindEvaluationSchedule({
                   experimentId: lastExperiment.id,
                   seed: `${lastExperiment.id}:blind`,
-                  candidates: lastExperiment.sourcePackages.map((source) => ({
-                    id: `${source.id}-candidate-0`,
-                    condition: source.condition,
-                    playbackAssetId: source.assetIds[0] ?? source.id,
-                    providerId: lastExperiment.provider.providerId,
-                    providerVersion: lastExperiment.provider.providerVersion,
-                  })),
+                  candidates: phase4CandidatesFromArchive(candidateArchive),
                 });
+                setBlindSchedule(schedule);
+                setPrivateReveal(schedule.privateReveal);
+                void store.settings.put(
+                  archiveBoundKey(
+                    "presenterTwinBlindSchedule",
+                    lastExperiment.id,
+                    candidateArchive.archiveManifestSha256!,
+                  ),
+                  schedule,
+                );
                 downloadJson(
                   `${lastExperiment.id}-blind-public.json`,
                   publicBlindScheduleArtifact(schedule),
@@ -612,12 +772,9 @@ export function PresenterTwinPanel({
                     privateReveal: schedule.privateReveal,
                   },
                 );
-                const sheet = emptyRatingSheet({
-                  experimentId: lastExperiment.id,
+                const csv = blankRatingSheetCsv({
                   blindIds: schedule.publicEntries.map((entry) => entry.blindId),
                 });
-                downloadJson(`${lastExperiment.id}-rating-sheet.json`, sheet);
-                const csv = ratingSheetToCsv(sheet);
                 const blob = new Blob([csv], { type: "text/csv" });
                 const url = URL.createObjectURL(blob);
                 const anchor = document.createElement("a");
@@ -626,7 +783,7 @@ export function PresenterTwinPanel({
                 anchor.click();
                 URL.revokeObjectURL(url);
                 setMessage(
-                  "Downloaded public blind schedule, private reveal, and rating sheet (JSON+CSV). Keep reveal offline.",
+                  "Downloaded the candidate-backed public schedule, private reveal, and blank CSV rating sheet. Keep reveal offline.",
                 );
               }}
             >
@@ -643,10 +800,21 @@ export function PresenterTwinPanel({
           <h2>After generation (import)</h2>
           <div className="train-setup">
             <label>
+              Candidate archive (JSON)
+              <input
+                type="file"
+                accept="application/json,.json"
+                onChange={(event) =>
+                  void importCandidateArchive(event.target.files?.[0])
+                }
+              />
+            </label>
+            <label>
               Private reveal key (JSON)
               <input
                 type="file"
                 accept="application/json,.json"
+                disabled={!candidateArchive}
                 onChange={(event) =>
                   void importReveal(event.target.files?.[0])
                 }
@@ -657,28 +825,74 @@ export function PresenterTwinPanel({
               <input
                 type="file"
                 accept="application/json,.json,text/csv,.csv"
+                disabled={!blindSchedule}
                 onChange={(event) =>
                   void importRatings(event.target.files?.[0])
                 }
               />
             </label>
+          </div>
+          <h2>Human success gates</h2>
+          <div className="train-setup">
             <label>
-              Candidate archive (JSON)
-              <input
-                type="file"
-                accept="application/json,.json"
+              Intended-use candidate review
+              <select
+                value={acceptableCandidate}
+                disabled={!candidateArchive}
                 onChange={(event) =>
-                  void importCandidateArchive(event.target.files?.[0])
+                  setAcceptableCandidate(event.target.value)
+                }
+              >
+                <option value="__unreviewed__">Not reviewed</option>
+                <option value="__none__">No acceptable candidate</option>
+                {candidateArchive?.entries
+                  .filter(
+                    (entry) =>
+                      entry.durationSec >= 10 && entry.durationSec <= 60,
+                  )
+                  .map((entry) => (
+                    <option key={entry.candidateId} value={entry.candidateId}>
+                      Acceptable: {entry.candidateId} ·{" "}
+                      {entry.durationSec.toFixed(1)}s
+                    </option>
+                  ))}
+              </select>
+            </label>
+            <label>
+              Provider data-control and rights
+              <select
+                value={providerDisposition}
+                onChange={(event) =>
+                  setProviderDisposition(event.target.value)
+                }
+              >
+                <option value="__unreviewed__">Not reviewed</option>
+                <option value="acceptable">Acceptable</option>
+                <option value="unacceptable">Unacceptable</option>
+              </select>
+            </label>
+            <label className="feature-flag">
+              <input
+                type="checkbox"
+                checked={expertReviewComplete}
+                onChange={(event) =>
+                  setExpertReviewComplete(event.target.checked)
                 }
               />
+              Expert frame-by-frame artifact review completed
             </label>
           </div>
           <div className="button-row">
             <button
               type="button"
               className="secondary"
-              disabled={!lastExperiment || !importedRatings || !privateReveal.length}
-              onClick={computeEvaluation}
+              disabled={
+                !lastExperiment ||
+                !importedRatings ||
+                !blindSchedule ||
+                !privateReveal.length
+              }
+              onClick={() => void computeEvaluation()}
             >
               Score ratings → go/no-go suggestion
             </button>

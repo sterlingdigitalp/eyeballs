@@ -1,15 +1,49 @@
 import { describe, expect, it } from "vitest";
 import {
   attachCandidateArchiveToExperimentNotes,
+  blankRatingSheetCsv,
   emptyRatingSheet,
   measureEvaluatorConsistency,
   parseRatingSheetCsv,
+  phase4CandidatesFromArchive,
   phase4CaptureChecklist,
   proposePhase4Decision,
   ratingSheetToCsv,
   sealCandidateArchive,
+  validateRatingSheetForSchedule,
+  verifyCandidateArchive,
 } from "./phase4-artifacts";
-import { evaluationDimensions } from "./presenter-twin-experiment";
+import {
+  evaluationDimensions,
+  type PresenterTwinExperiment,
+} from "./presenter-twin-experiment";
+
+const experiment = (): PresenterTwinExperiment => ({
+  format: "presenter-twin-experiment/1.0.0",
+  id: "exp-1",
+  createdAt: "2026-07-26T12:00:00.000Z",
+  sourcePackages: [],
+  provider: {
+    providerId: "p",
+    providerVersion: "1",
+    reviewedAt: "2026-07-26T12:00:00.000Z",
+    localOrCloud: "local",
+    acceptedSourceDurationSec: { min: 1, max: 60 },
+    acceptedResolution: ["1920x1080"],
+    acceptedCodecs: ["h264"],
+    acceptsSegmentedSources: true,
+    acceptsSeparateVoice: true,
+    identityVerification: "x",
+    retentionPolicy: "x",
+    deletionPolicy: "x",
+    outputRights: "x",
+    estimatedCost: "0",
+    watermarkOrProvenance: "x",
+    workflow: "manual",
+  },
+  generationRequests: [],
+  manifestSha256: "b".repeat(64),
+});
 
 describe("Phase 4 empirical artifacts", () => {
   it("builds a full rating sheet and CSV header", () => {
@@ -26,6 +60,12 @@ describe("Phase 4 empirical artifacts", () => {
     const csv = ratingSheetToCsv(sheet);
     expect(csv.split("\n")[0]).toContain("camera_contact");
     expect(csv).toContain("candidate-001");
+    const blank = blankRatingSheetCsv({
+      blindIds: ["candidate-001"],
+      evaluatorId: "r1",
+    });
+    expect(blank.split("\n")[1]).toContain("r1,candidate-001");
+    expect(() => parseRatingSheetCsv(blank, "exp-1")).toThrow(/Invalid score/);
   });
 
   it("seals a candidate archive with content hash", async () => {
@@ -38,6 +78,7 @@ describe("Phase 4 empirical artifacts", () => {
           condition: "uncoached_baseline",
           playbackRelativePath: "candidates/c1.mp4",
           sha256: "a".repeat(64),
+          durationSec: 30,
           providerId: "p",
           providerVersion: "1",
           seed: 1,
@@ -46,35 +87,63 @@ describe("Phase 4 empirical artifacts", () => {
     });
     expect(archive.archiveManifestSha256).toMatch(/^[a-f0-9]{64}$/i);
     const note = attachCandidateArchiveToExperimentNotes({
-      experiment: {
-        format: "presenter-twin-experiment/1.0.0",
-        id: "exp-1",
-        createdAt: "2026-07-26T12:00:00.000Z",
-        sourcePackages: [],
-        provider: {
-          providerId: "p",
-          providerVersion: "1",
-          reviewedAt: "2026-07-26T12:00:00.000Z",
-          localOrCloud: "local",
-          acceptedSourceDurationSec: { min: 1, max: 60 },
-          acceptedResolution: ["1920x1080"],
-          acceptedCodecs: ["h264"],
-          acceptsSegmentedSources: true,
-          acceptsSeparateVoice: true,
-          identityVerification: "x",
-          retentionPolicy: "x",
-          deletionPolicy: "x",
-          outputRights: "x",
-          estimatedCost: "0",
-          watermarkOrProvenance: "x",
-          workflow: "manual",
-        },
-        generationRequests: [],
-        manifestSha256: "b".repeat(64),
-      },
+      experiment: experiment(),
       archive,
     });
     expect(note.candidateCount).toBe(1);
+  });
+
+  it("verifies archive content, A-D coverage, and provider lineage", async () => {
+    const archive = await sealCandidateArchive({
+      experimentId: "exp-1",
+      createdAt: "2026-07-26T12:00:00.000Z",
+      entries: [
+        "uncoached_baseline",
+        "coached_continuous",
+        "curated_diverse",
+        "real_reference",
+      ].map((condition, index) => ({
+        candidateId: `c${index + 1}`,
+        condition: condition as
+          | "uncoached_baseline"
+          | "coached_continuous"
+          | "curated_diverse"
+          | "real_reference",
+        playbackRelativePath: `candidates/c${index + 1}.mp4`,
+        sha256: String(index + 1).repeat(64),
+        durationSec: 30,
+        providerId: condition === "real_reference" ? undefined : "p",
+        providerVersion: condition === "real_reference" ? undefined : "1",
+      })),
+    });
+    const verified = await verifyCandidateArchive({
+      archive,
+      experiment: experiment(),
+    });
+    expect(phase4CandidatesFromArchive(verified)).toHaveLength(4);
+    await expect(
+      verifyCandidateArchive({
+        archive: {
+          ...archive,
+          entries: archive.entries.map((entry, index) =>
+            index === 0 ? { ...entry, notes: "tampered" } : entry,
+          ),
+        },
+        experiment: experiment(),
+      }),
+    ).rejects.toThrow(/SHA-256/);
+    const wrongProvider = await sealCandidateArchive({
+      ...archive,
+      entries: archive.entries.map((entry, index) =>
+        index === 0 ? { ...entry, providerId: "other" } : entry,
+      ),
+    });
+    await expect(
+      verifyCandidateArchive({
+        archive: wrongProvider,
+        experiment: experiment(),
+      }),
+    ).rejects.toThrow(/provider lineage/);
   });
 
   it("exposes the Phase 4 capture checklist", () => {
@@ -126,6 +195,49 @@ describe("Phase 4 empirical artifacts", () => {
       decidedComparisons: 5,
       hasAcceptableCandidate: true,
       providerAcceptable: true,
+      expertReviewComplete: true,
     }).suggested).toBe("go");
+    expect(proposePhase4Decision({
+      coachedWinRate: 0.8,
+      decidedComparisons: 5,
+      hasAcceptableCandidate: true,
+      providerAcceptable: true,
+    }).suggested).toBe("pending");
+  });
+
+  it("requires complete, unique ratings for every blind candidate", () => {
+    const sheet = emptyRatingSheet({
+      experimentId: "exp-1",
+      blindIds: ["candidate-001", "candidate-002"],
+      evaluatorId: "r1",
+      createdAt: "2026-07-26T12:00:00.000Z",
+    });
+    const schedule = {
+      format: "presenter-twin-blind-schedule/1.0.0" as const,
+      experimentId: "exp-1",
+      publicEntries: [
+        { blindId: "candidate-001", playbackAssetId: "a.mp4" },
+        { blindId: "candidate-002", playbackAssetId: "b.mp4" },
+      ],
+      privateReveal: [],
+    };
+    expect(
+      validateRatingSheetForSchedule({ sheet, schedule }).ratings,
+    ).toHaveLength(2);
+    expect(() =>
+      validateRatingSheetForSchedule({
+        sheet: { ...sheet, ratings: sheet.ratings.slice(0, 1) },
+        schedule,
+      }),
+    ).toThrow(/missing/);
+    expect(() =>
+      validateRatingSheetForSchedule({
+        sheet: {
+          ...sheet,
+          ratings: [...sheet.ratings, sheet.ratings[0]],
+        },
+        schedule,
+      }),
+    ).toThrow(/more than once/);
   });
 });
