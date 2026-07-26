@@ -1,0 +1,60 @@
+{
+  "boundary": {
+    "finalizeWallGap": {
+      "count": 345,
+      "maxMs": 12096.152,
+      "maxUs": 12096152.0,
+      "meanMs": 10404.913623188406,
+      "meanUs": 10404913.623188406,
+      "medianMs": 10430.596,
+      "medianUs": 10430596.0,
+      "minMs": 6640.572,
+      "minUs": 6640572.0,
+      "stdevUs": 235120.88125577001
+    },
+    "note": "videoPtsGap is \u0394 firstVideoPtsUs between consecutive segment_finalized events. Near segmentDurationSec (e.g. 10s) is healthy; large outliers need review.",
+    "outlierCount": 0,
+    "outlierGaps": [],
+    "videoPtsGap": {
+      "count": 345,
+      "maxMs": 12101.29,
+      "maxUs": 12101290.0,
+      "meanMs": 10414.144057971014,
+      "meanUs": 10414144.057971014,
+      "medianMs": 10434.43,
+      "medianUs": 10434430.0,
+      "minMs": 9834.38,
+      "minUs": 9834380.0,
+      "stdevUs": 123987.26108616487
+    }
+  },
+  "eventCount": 17748,
+  "eventsPath": "/private/tmp/capture-core-soak/macbook-20260726T134706Z/events.jsonl",
+  "finished": {
+    "avInitialOffsetUs": 40934,
+    "droppedVideo": 0,
+    "finalizedSegments": 346,
+    "measuredVideoFps": 29.989221942831904,
+    "negotiatedFrameRate": 30,
+    "negotiatedHeight": 1080,
+    "negotiatedWidth": 1920,
+    "previewFrames": 15667,
+    "videoFrames": 107966,
+    "wallDurationSec": 3600.1600910425186
+  },
+  "healthSampleCount": 1730,
+  "healthTrends": {
+    "approxBytesWrittenFromDiskFree": 0.0,
+    "diskFreeBytesEnd": 710689888663.0,
+    "diskFreeBytesStart": 710689888663.0,
+    "instantaneousFps": {
+      "count": 1729,
+      "max": 30.571720763819652,
+      "mean": 29.989629022631394,
+      "median": 30.00056719822359,
+      "min": 21.569105538571186
+    }
+  },
+  "segmentFinalizedCount": 346,
+  "sessionRoot": "/private/tmp/capture-core-soak/macbook-20260726T134706Z/session"
+}

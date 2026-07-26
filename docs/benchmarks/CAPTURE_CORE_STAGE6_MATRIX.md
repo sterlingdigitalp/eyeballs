@@ -68,7 +68,7 @@ Fill `Result` with PASS / FAIL / SKIP and link run dir or commit note.
 | # | Test | Procedure | Acceptance | Result | Evidence |
 |---|---|---|---|---|---|
 | 1 | **1h Brio 4K + Yeti soak** | `run-capture-core-soak.sh brio-yeti 3600` | exit 0; validation PASS; honest measured FPS; hashes; disk growth sane | **PASS** | `docs/benchmarks/soaks/brio-yeti-20260726T115313Z-SUMMARY.md` · runDir `/tmp/capture-core-soak/brio-yeti-20260726T115313Z` · measured **~23.97 fps** · 345 segments · 0 drops · ~14 GiB · validation RESULT=PASS |
-| 2 | **1h MacBook + built-in mic** | `run-capture-core-soak.sh macbook 3600` | same as #1 for built-in profile | | |
+| 2 | **1h MacBook + built-in mic** | `run-capture-core-soak.sh macbook 3600` | same as #1 for built-in profile | **PASS** | `docs/benchmarks/soaks/macbook-20260726T134706Z-SUMMARY.md` · measured **~29.99 fps** · 346 segments · 0 drops · ~2.8 GiB · seal=yes · validation PASS · boundary outliers 0 |
 | 3 | **Segmented multi-hour** | e.g. `brio-yeti-1080` 7200–10800 after #1 | no crash; memory/handles stable; drift noted | | |
 | 4 | **Camera unplug mid open segment** | Start soak; unplug Brio mid-segment | prior segments playable; no false complete | | |
 | 5 | **Mic unplug mid record** | Unplug Yeti mid-take | policy-documented behavior; honest incomplete/degraded | | |

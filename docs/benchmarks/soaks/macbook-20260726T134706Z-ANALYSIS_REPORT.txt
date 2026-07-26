@@ -1,0 +1,28 @@
+CaptureCore session analysis (Stage 6)
+sessionRoot=/private/tmp/capture-core-soak/macbook-20260726T134706Z/session
+events=/private/tmp/capture-core-soak/macbook-20260726T134706Z/events.jsonl
+eventCount=17748
+segmentFinalizedCount=346
+healthSampleCount=1730
+
+## Finished honesty
+measuredVideoFps=29.989221942831904
+negotiated=1920x1080@30
+wallDurationSec=3600.1600910425186
+avInitialOffsetUs=40934 (40.93 ms)
+videoFrames=107966 droppedVideo=0
+previewFrames=15667
+
+## Segment boundary (firstVideoPtsUs gaps)
+count=345
+meanSec=10.4141 medianSec=10.4344
+minSec=9.8344 maxSec=12.1013
+outlierCount=0 (outside 50–150% of segmentDuration)
+
+## Health instantaneous FPS (between health samples)
+count=1729 mean=29.990 median=30.001 min=21.569 max=30.572
+
+## Disk free (from health)
+start=710689888663.0 end=710689888663.0 approxConsumedBytes=0.0
+
+RESULT=ANALYZED
