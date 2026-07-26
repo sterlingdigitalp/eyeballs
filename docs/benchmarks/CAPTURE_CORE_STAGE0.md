@@ -63,12 +63,55 @@ Session: `/tmp/capture-core-stage0-kill` · 1080p request · stdin held open via
 
 Note: first kill attempt failed methodology (background job closed stdin → EOF treated as `stop`). Real kill requires stdin held open.
 
-**Follow-ups (not blockers for coding ahead):**
+## Stage 2 native proof — **COMPLETE** (2026-07-26 close-out)
 
-1. Requested 30 fps; dual take container reports ~**24 fps** — confirm active format / writer timescale.  
-2. Audio is **AAC in CAF**, not raw PCM — charter prefers PCM for masters; change after vertical slice.  
-3. Abrupt-kill files are **not playable** yet (`moov atom not found` on video; CAF incomplete). Bytes retained on disk; **recoverable decode** still needs short finalized segments or a kill-safe writer.  
-4. 1h soak remains Stage 6 hardening.
+Charter Stage 2 exit met with Terminal + packaged `CaptureCore.app` evidence below.  
+(ADR-004 remains Provisional until Stage 6 soak/matrix; Stage 2 only requires proof notes.)
+
+### Dual take (clean stop) — PASS
+
+Session: `/tmp/capture-core-stage2-dual` · maxDuration 15s · segmentDuration 10s · exit **0**
+
+| Check | Result |
+|---|---|
+| Brio + Yeti simultaneous | Pass |
+| Active format | **3840×2160**, range 5–30 fps (UVC duration lock skipped — see crash fix `a41356d`) |
+| Delivered video rate | ffprobe **24 fps** (format advertises 30; honest limitation without frame-duration lock) |
+| H.264 masters | Pass · 2 segments (`seg_000` ~10.5s, `seg_001` remainder) |
+| PCM audio | **Int16 mono 48 kHz** CAF (`preferPcmAudio: true`) |
+| Sample PTS | Present on both streams (protocol health / segment_finalized) |
+| `recording-finished.json` | `status: complete` |
+| Segment rotation | Pass (2 video + 2 audio files) |
+
+SHA-256:
+
+| File | Digest |
+|---|---|
+| seg_000_video.mov | `1b688f827905aa8dbcd37473a96a2a93857e57561746941c52d3b75a8f04f71b` |
+| seg_000_audio.caf | `afe4fad9388a972c37e200f1578ef6c4170fbee9fa95a18fcf72029fa1f9e0f7` |
+| seg_001_video.mov | `e98e385b3a4fb28eb8ecfb9181906c102c2ebf95f6245ca67276673cbc304ce3` |
+| seg_001_audio.caf | `3ccd40c5cdb9c0e2429b08549d8453730d639273248d80506a9e5d6ae4fab277` |
+
+### Kill recovery (10s segments) — PASS
+
+Session: `/tmp/capture-core-stage2-kill` · 1080p · SIGKILL after ~12s · stdin held open
+
+| Check | Result |
+|---|---|
+| SIGKILL delivered while recording | Pass |
+| `recording-finished.json` | **MISSING** (honest incomplete) |
+| `segment_finalized` before kill | Pass — `seg_000` reason `segment_duration` |
+| **Playable finalized segment after kill** | **Pass** — `seg_000_video.mov` H.264 1920×1080 ~10.5s; `seg_000_audio.caf` pcm_s16le ~10.5s |
+| Open segment at kill | `seg_001_video.mov` unplayable (`moov atom not found`) — expected |
+| Open audio fragment | Short PCM CAF ~0.35s still probes |
+
+**Recovery story validated:** only the open segment is at risk; prior finalized segments remain reviewable.
+
+### Known limitations (not Stage 2 blockers)
+
+1. Delivered fps often **24** on Brio 4K even when format lists 30 (no UVC frame-duration lock after SIGABRT on `setActiveVideoMinFrameDuration`).  
+2. Product-parent TCC (Tauri host) proven later in Stage 4 live take.  
+3. 1h soak + failure matrix → Stage 6.
 
 ### Commands used
 
@@ -77,7 +120,8 @@ cd native/capture-macos
 ./scripts/package-capture-core-app.sh
 APP=.build/CaptureCore.app/Contents/MacOS/capture-core
 $APP list-devices
-# record with Brio + Yeti uniqueIds, maxDurationSec 15, 4K/30
+# dual: 4K + Yeti, segmentDurationSec 10, maxDurationSec 15, preferPcmAudio true
+# kill: 1080p, segmentDurationSec 10, SIGKILL at ~12s with stdin held open
 ```
 
 ## Protocol smoke (agent-safe)
@@ -138,9 +182,9 @@ Expect: `state starting → recording → segment_finalized → recording_finish
 | Live protocol events + Stop | `capture-core-event`, `capture_core_stop` |
 | Binary resolve (exe dir / sidecar / repo) | `resolve_capture_core_binary` |
 
-## Next (Stage 2–4)
+## Next
 
-1. ~~Human dual short take~~ **Done**. ~~Kill recovery~~ **Done** (partial files, no finish marker).  
-2. Re-verify live dual take after PCM + fps + fragment changes (short Terminal take).  
-3. ~~Sidecar packaging wiring~~ **Done** (prepare script + externalBin; full release sign later).  
-4. Later: 1h soak + failure matrix before ADR-004 → Accepted.
+1. ~~Charter Stage 2 native proof~~ **COMPLETE** (dual + kill with playable prior segment).  
+2. **Stage 4 exit:** Dataset **Live record** in Tauri → hashed masters (dry-run already green).  
+3. Stage 5 preview/analysis transport (after Stage 4).  
+4. Stage 6: 1h soak + failure matrix → ADR-004 Accepted.

@@ -150,44 +150,45 @@ If fragmented MOV is chosen instead, Stage 0 must **prove** abrupt-kill decodabi
 
 ### 1. Repository and contract preparation — 1–2 days
 
-- [ ] Clean/isolate worktree: `feature/capture-core` (not the dirty Phase 2/3 tree).
-- [ ] Checkpoint coaching work elsewhere (commit or stash on its own branch).
-- [ ] Protocol v1 types (Rust + Swift shared JSON schema doc).
-- [ ] Device-binding schema PR.
-- [ ] Segment/recovery decision recorded in ADR-004 or spike notes.
+- [x] Clean/isolate worktree: `feature/capture-core` (not the dirty Phase 2/3 tree).
+- [x] Checkpoint coaching work elsewhere (commit or stash on its own branch).
+- [x] Protocol v1 types (Rust + Swift shared JSON schema doc).
+- [x] Device-binding schema PR.
+- [x] Segment/recovery decision recorded in ADR-004 or spike notes.
 
-**Exit:** branch exists; protocol + bindings documented; no coaching WIP mixed in.
+**Exit:** branch exists; protocol + bindings documented; no coaching WIP mixed in. **MET.**
 
 ### 2. Native proof — 3–5 days
 
-- [ ] Brio 4K/30 sample-buffer capture to disk.
-- [ ] Simultaneous Brio + Yeti.
-- [ ] Sample-level timestamps logged.
-- [ ] Hardware encode path confirmed.
-- [ ] Sidecar packaging / signed-bundle TCC experiment.
-- [ ] Clean stop + process-kill recovery experiment (segments).
+- [x] Brio 4K sample-buffer capture to disk (delivered ~24 fps; format advertises 30 — see Stage 0 notes).
+- [x] Simultaneous Brio + Yeti.
+- [x] Sample-level timestamps logged.
+- [x] Hardware encode path confirmed (H.264 masters).
+- [x] Sidecar packaging / TCC via packaged `CaptureCore.app` (Terminal parent).
+- [x] Clean stop + process-kill recovery (10s segments: prior segment playable after SIGKILL).
 
-**Exit:** evidence notes under `docs/benchmarks/` (or spike markdown); ADR-004 can move toward Accepted.
+**Exit:** evidence notes under `docs/benchmarks/` (or spike markdown); ADR-004 can move toward Accepted.  
+**MET** — see `docs/benchmarks/CAPTURE_CORE_STAGE0.md` § Stage 2 complete (2026-07-26).
 
 ### 3. CaptureCore CLI — 1–2 weeks
 
-- [ ] Real state machine + writers (video/audio outputs as above).
-- [ ] JSONL protocol on stdin/stdout.
-- [ ] Segments/checkpoints.
-- [ ] Validation + deterministic exit codes.
-- [ ] Automated tests where possible (fixtures, kill tests).
+- [x] Real state machine + writers (video/audio outputs as above).
+- [x] JSONL protocol on stdin/stdout.
+- [x] Segments/checkpoints.
+- [x] Validation + deterministic exit codes.
+- [x] Automated tests where possible (fixtures, dry-run multi-segment).
 
-**Exit:** `capture-core record --request …` completes a scripted session without Tauri UI.
+**Exit:** `capture-core record --request …` completes a scripted session without Tauri UI. **MET.**
 
 ### 4. Tauri vertical slice — ~1 week
 
-- [ ] Rust lifecycle supervisor (spawn, stdin stop, collect stdout, exit handling).
-- [ ] Explicit release of webview camera before start.
-- [ ] App-created root-confined session directory.
-- [ ] **30-second** app recording → validate → **Rust SHA-256** on closed files.
-- [ ] Orphan-session scan at startup (incomplete sessions + leftover processes).
+- [x] Rust lifecycle supervisor (spawn, stdin stop, collect stdout, exit handling).
+- [x] Explicit release of webview camera before start.
+- [x] App-created root-confined session directory.
+- [ ] **30-second** app recording → validate → **Rust SHA-256** on closed files. *(dry-run + seal done; live Dataset take pending)*
+- [x] Orphan-session scan at startup (incomplete sessions + leftover processes).
 
-**Exit:** one button in Dataset mode produces hashed masters on disk.
+**Exit:** one button in Dataset mode produces hashed masters on disk. **IN PROGRESS** — UI/commands ready; human live take closes exit.
 
 ### 5. Preview/analysis transport — 1–2 weeks
 
